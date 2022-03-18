@@ -1,0 +1,7 @@
+---
+title: "Spatiophylogenetic modelling: the end-Cretaceous extinction"
+...
+
+```{r renv, echo = FALSE}
+renv::init()
+```
