@@ -2,6 +2,167 @@
 title: "Spatiophylogenetic modelling: the end-Cretaceous extinction"
 ...
 
-```{r renv, echo = FALSE}
+# Introduction
+
+The aim of this part of the project is to use occurrence data of bivalves from across the Cretaceous–Palaeogene boundary to reconstruct extinction prevalence and potential drivers of this.
+
+```{r renv_init, eval = FALSE}
 renv::init()
+```
+
+```{r packages}
+library(jsonlite)
+library(ggthemes)
+library(mapproj)
+library(proj4)
+library(rnaturalearth)
+library(sf)
+library(tidyverse)
+library(viridis)
+```
+
+# Acquiring data
+
+The data come from the [Paleobiology Database](https://paleobiodb.org/#/) (PBDB). Occurrences are downloaded though their [API](https://paleobiodb.org/data1.2/).
+
+First we can download the data as a JSON file and save this to disc: this is our master data set. For this, I've gathered occurrences of Bivalvia from the Cretaceous and Paleogene with all of the occurrence, geographical, systematic, and ecological data.
+
+```{r download_pbdb_data, eval = FALSE}
+bivalve_pbdb_url <-
+  paste0(
+    "https://paleobiodb.org/data1.2/", # PBDB API URL
+    "occs/", # occurrences
+    "list.json?", # download a JSON file
+    "base_name=Bivalvia&", # download bivalve occurrences
+    "interval=Cretaceous,Paleogene&", # temporal range to include
+    "show=full" # include full data
+  )
+bivalve_pbdb_file <- paste0(Sys.Date(), "-bivalve_pbdb_occurrences.json")
+download.file(bivalve_pbdb_url, bivalve_pbdb_file, method = "curl")
+```
+
+The data file can then be loaded into R, which gives a list with length two: the first element (`$elapsed_time`) gives the original download time and the second element (`$records`) is a `data.frame` of the PBDB occurrence data.
+
+```{r read_pbdb_data}
+bivalve_pbdb_file <- paste0(Sys.Date(), "-bivalve_pbdb_occurrences.json")
+bivalve_pbdb_data <- jsonlite::fromJSON(bivalve_pbdb_file)$records |>
+  as_tibble()
+```
+
+We won't need data from all the columns, but the important few are:
+
+* `oid`: occurrence ID, a unique reference number.
+* `idn`: the originally identified name.
+* `tna`: the currently accepted name.
+* `rnk`: taxonomic rank of the accepted name.
+* `oei`, `oli`: earliest and latest occurrence interval names.
+  - `eag` and `lag` are ages at the beginning and end of these intervals, taken from the [*Geologic Time Scale*](https://timescalecreator.org/index/index.php), but may want to update to a recent version.
+* `fml`: family of the occurring taxon.
+  - higher taxon levels are also included.
+* `lng`, `lat`: modern longitude and latitude of the occurrence.
+  - `pln` and `pln` are the reconstructed palaeocoordinates, but it may be worth re-doing these to confirm or with a different tectonic model.
+* `env`: the palaeoenvironment, useful to check localities and habitats, exclude freshwater species etc. 
+* Various [palaeocological/ecospace data](https://paleobiodb.org/data1.2/general/ecotaph_doc.html#Ecospace), such as habitat depth (`jlh`), general environment (`jev`), feeding mode (`jdt`).
+* `jco`: composition/mineralogy of shells.
+
+A full list of the fields is at the bottom of [this page](https://paleobiodb.org/data1.2/occs/list_doc.html#response).
+
+# Querying data #
+
+It's a good check to have a quick look at the data to check its size and what different values are contained within. Most of the PBDB data are categorical or strings, which makes it a little more difficult (you can't plot a bar chart for instance, except you can). A few things to check:
+
+* How many records are identified to species level? genus? family?
+* How many different species/genera/families are include?
+* How many records don't have accepted values?
+
+
+```{r check_species}
+bivalve_pbdb_data$records |>
+  filter(rnk == 3) |>
+  group_by(tna) |>
+  summarize(n())
+```
+
+Or a more fun thing to plot the occurrences from different families.
+
+```{r plot_family_occurrences}
+family_occurrences <-
+  bivalve_pbdb_data$records |>
+    filter(rnk == c(3, 4, 5)) |>
+    group_by(fml) |>
+    summarize(family_occurrences = n())
+family_occurrences |>
+  ggplot(aes(x = reorder(fml, desc(family_occurrences)), y = family_occurrences)) +
+    geom_col()
+family_occurrences |>
+  slice_max(family_occurrences, n = 10)
+```
+
+## Data quality ##
+
+Now we can do a more thorough look through the data to check that it's correct, or at least in the form we expect it to be. First is the relatively easy one: checking for numbers in columns that should have the, such as rnk, lng, and lat. On import this column is started as a character string in the tibble. We can check whether any of the records are not proper numbers by searching for characters not found in a number: i.e. not digits, decimal points, or minus signs.
+
+```{r data_cleaning}
+# search for strings that don't contain a digit, full stop/decimal point, or hyphen/minus, i.e. those that aren't a number
+number_as_character_regexp <- "[^[[:digit:]]\\.\\-]"
+
+check_numeric_column <- function(column, data) {
+  column_vector <- pull(data, column)
+  string_match <- str_which(column_vector, number_as_character_regexp)
+  if (length(string_match) == 0) {
+    print(paste(column, ": All items are (probably) numbers."))
+  } else {
+    print(paste(column, ": Some items (probably) aren't numbers."))
+    string_match
+  }
+}
+
+c("lng", "lat", "rnk") |>
+  walk(check_numeric_column, data = bivalve_pbdb_data)
+```
+
+Assuming this above comes out tickety-boo, then we can simply replace and reformat those columns to numeric values. It's always a good plan to create a new object doing this so that you don't lose the original data, just in case things go wrong later.
+
+```{r reformatting_numeric_data}
+bivalve_cleaned <-
+  bivalve_pbdb_data |>
+  mutate(across(c(rnk, lng, lat), as.numeric))
+```
+
+The same should be done for the columns we expect to have character strings in, i.e. the accepted name and family column.
+
+
+# Mapping data #
+
+We can also do more fun things like plot the occurrences on a map.
+
+```{r map_occurrences}
+world_map <-
+  ne_countries(returnclass = "sf") |>
+  st_transform(crs = "+proj=moll")
+
+occurrences_to_plot <-
+  bivalve_cleaned |>
+  filter(rnk == 3) |>
+  slice_sample(n = 1000)
+
+projected_coords <- 
+project(occurrences_to_plot[, c("lng", "lat")], proj = "+proj=moll")
+occurrences_to_plot <-
+  occurrences_to_plot |>
+  mutate(
+    lng = projected_coords$x,
+    lat = projected_coords$y
+  )
+
+  ggplot() +
+    geom_sf(data = world_proj, inherit.aes = FALSE) +
+    geom_point(data = occurrences_to_plot, mapping = aes(x = lng, y = lat, colour = fml)) +
+    scale_colour_viridis(discrete = TRUE) +
+    coord_sf(crs = st_crs(world_proj)) +
+    theme_map() +
+    theme(
+      legend.position = "none",
+      plot.background = element_blank(),
+    )
 ```
