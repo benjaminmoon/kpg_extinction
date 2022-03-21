@@ -6,20 +6,31 @@ title: "Spatiophylogenetic modelling: the end-Cretaceous extinction"
 
 The aim of this part of the project is to use occurrence data of bivalves from across the Cretaceous–Palaeogene boundary to reconstruct extinction prevalence and potential drivers of this.
 
+## Project environment ##
+
+
 ```{r renv_init, eval = FALSE}
 renv::init()
 ```
+
+*renv*, used above, sets up a *project environment* that stores the packages and versions used to make the project work. The idea of this is to enable you to go back to this after some time and get the project working again, no matter what's changed or been updated in the meantime. Similarly, send the project to a collaborator and they can set things up to be working quickly and easily without having to search through packages to install. I've already *initialized* this project, to get things going on your computer should a matter of opening R in this filter. *renv* will then install itself and any packages needed into its own library.
 
 ```{r packages}
 library(jsonlite)
 library(ggthemes)
 library(mapproj)
-library(proj4)
 library(rnaturalearth)
 library(sf)
 library(tidyverse)
 library(viridis)
 ```
+
+## Useful background and sites ##
+
+I'm rather opinionated about code and formatting. I think it's generally better to be strict about the packages you use and how you write the code. I tend to use tidyverse style and formatting, which has [a guide](https://r4ds.had.co.nz/index.html) written by Hadley Wickham, who's created some of the most used R packages. Google have a [style guide](https://google.github.io/styleguide/Rguide.html) for writing R code that I recommend following, but as a guide can and should be changed to meet your needs.
+
+This guide is written in [R Markdown](https://rmarkdown.rstudio.com/articles_intro.html), a text format that combines text and code and can be run easily in R Studio and other environments. I also tend to use *ggplot* for plotting, so have look [here](https://ggplot2-book.org) for the low-down on that package.
+
 
 # Acquiring data
 
@@ -41,10 +52,10 @@ bivalve_pbdb_file <- paste0(Sys.Date(), "-bivalve_pbdb_occurrences.json")
 download.file(bivalve_pbdb_url, bivalve_pbdb_file, method = "curl")
 ```
 
-The data file can then be loaded into R, which gives a list with length two: the first element (`$elapsed_time`) gives the original download time and the second element (`$records`) is a `data.frame` of the PBDB occurrence data.
+The data file can then be loaded into R, which gives a list with length two: the first element (`$elapsed_time`) gives the original download time and the second element (`$records`) is a `data.frame` of the PBDB occurrence data. We keep just this second part.
 
 ```{r read_pbdb_data}
-bivalve_pbdb_file <- paste0(Sys.Date(), "-bivalve_pbdb_occurrences.json")
+bivalve_pbdb_file <- "2022-03-18-bivalve_pbdb_occurrences.json"
 bivalve_pbdb_data <- jsonlite::fromJSON(bivalve_pbdb_file)$records |>
   as_tibble()
 ```
@@ -75,9 +86,8 @@ It's a good check to have a quick look at the data to check its size and what di
 * How many different species/genera/families are include?
 * How many records don't have accepted values?
 
-
 ```{r check_species}
-bivalve_pbdb_data$records |>
+bivalve_pbdb_data |>
   filter(rnk == 3) |>
   group_by(tna) |>
   summarize(n())
@@ -87,7 +97,7 @@ Or a more fun thing to plot the occurrences from different families.
 
 ```{r plot_family_occurrences}
 family_occurrences <-
-  bivalve_pbdb_data$records |>
+  bivalve_pbdb_data |>
     filter(rnk == c(3, 4, 5)) |>
     group_by(fml) |>
     summarize(family_occurrences = n())
@@ -134,35 +144,42 @@ The same should be done for the columns we expect to have character strings in, 
 
 # Mapping data #
 
-We can also do more fun things like plot the occurrences on a map.
+We can also do more fun things like plot the occurrences on a map. Useful guides to this are found in three blog posts [starting here](https://r-spatial.org//r/2018/10/25/ggplot2-sf.html). Working with mapping data is more involved than simple points, particularly if you want to change the projection away from the standard Mercator. The package `sf` (short for 'simple features', describing how the data is stored) can deal with all of this and then in plotting the projection can be changed. A rule of thumb is make sure to assign the coordinate reference system (CRS) when creating map objects.
+
+Package `rnaturalearth` has regularly-updated maps that should be better to use than in the built-in `maps` library. Here we download the country outlines in *sf* format.
 
 ```{r map_occurrences}
 world_map <-
-  ne_countries(returnclass = "sf") |>
-  st_transform(crs = "+proj=moll")
+  ne_countries(returnclass = "sf")
+```
 
+Next, convert the occurrences locations into an *sf* object also. I've filtered down to occurrences identified to species level and then taken a random sample ('slice') of 1000 rows. The final stage is convert to an *sf* object using the longitude and latitude columns, with the standard WGS84 CRS (indicated with `4326` in this case). You can find this code to use looking at [epsg.io](https://epsg.io/4326), searching for the projection, and using the code given. In the case of WGS84 coordinates (standard latitude and longitude) shown this is 4326.
+
+```{r get_occurrence_points}
 occurrences_to_plot <-
   bivalve_cleaned |>
   filter(rnk == 3) |>
-  slice_sample(n = 1000)
-
-projected_coords <- 
-project(occurrences_to_plot[, c("lng", "lat")], proj = "+proj=moll")
-occurrences_to_plot <-
-  occurrences_to_plot |>
-  mutate(
-    lng = projected_coords$x,
-    lat = projected_coords$y
-  )
-
-  ggplot() +
-    geom_sf(data = world_proj, inherit.aes = FALSE) +
-    geom_point(data = occurrences_to_plot, mapping = aes(x = lng, y = lat, colour = fml)) +
-    scale_colour_viridis(discrete = TRUE) +
-    coord_sf(crs = st_crs(world_proj)) +
-    theme_map() +
-    theme(
-      legend.position = "none",
-      plot.background = element_blank(),
-    )
+  slice_sample(n = 1000) |>
+  st_as_sf(coords = c("lng", "lat"), crs = 4326, agr = "constant")
 ```
+
+Now, we put these together into the plot using the `geom_sf` function to build up the layers: map outline first, then points over the top. The colour scale is good for colour-blind people, so is a good option to prefer. Here I modify the map projection using `coord_sf(crs)` into the Mollweide projection. I need to work out about adding a border and grid lines at this point.
+
+```{r plot_occurrence_map}
+ggplot() +
+  geom_sf(data = world_map, inherit.aes = FALSE) +
+  geom_sf(data = occurrences_to_plot, mapping = aes(colour = fml)) +
+  scale_colour_viridis(discrete = TRUE) +
+  coord_sf(crs = "+proj=moll") +
+  theme_map() +
+  theme(
+    legend.position = "none",
+  )
+```
+
+# Things to do #
+
+* Look at the quality of the data: how many families? which ones are now extinct?
+* Can you identify occurrences that have erroneous names? 
+* What species go extinct across the Cretaceous–Palaeogene boundary?
+* Have a look at [this GitHub repository](https://github.com/benjaminmoon/palaeomap_example) showing how to get data and plot palaeogeographical maps. Can you do the same for occurrences in the Cretaceous and Palaeogene.
