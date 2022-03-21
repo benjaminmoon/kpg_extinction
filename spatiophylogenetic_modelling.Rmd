@@ -27,7 +27,9 @@ library(viridis)
 
 ## Useful background and sites ##
 
-I'm rather opinionated about code and formatting. I think it's generally better to be strict about the packages you use and how you write the code. I tend to use tidyverse style and formatting, which has [a guide](https://r4ds.had.co.nz/index.html) written by Hadley Wickham, who's created some of the most used R packages. Google have a [style guide](https://google.github.io/styleguide/Rguide.html) for writing R code that I recommend following, but as a guide can and should be changed to meet your needs.
+I'm rather opinionated about code and formatting. I think it's generally better to be strict about the packages you use and how you write the code. I tend to use *tidyverse* style and formatting, which has [a guide](https://r4ds.had.co.nz/index.html) written by Hadley Wickham, who's created some of the most used R packages. Google have a [style guide](https://google.github.io/styleguide/Rguide.html) for writing R code that I recommend following, but as a guide can and should be changed to meet your needs.
+
+I use *piping* a lot. This means passing the result of one function as the first argument of the next line. R has a native version shown as `|>`, but this is rather new (version 4.1.0). *tidyverse* and package *magrittr* has had a different version for while that looks like `%>%`, so you might see that online.
 
 This guide is written in [R Markdown](https://rmarkdown.rstudio.com/articles_intro.html), a text format that combines text and code and can be run easily in R Studio and other environments. I also tend to use *ggplot* for plotting, so have look [here](https://ggplot2-book.org) for the low-down on that package.
 
@@ -52,11 +54,12 @@ bivalve_pbdb_file <- paste0(Sys.Date(), "-bivalve_pbdb_occurrences.json")
 download.file(bivalve_pbdb_url, bivalve_pbdb_file, method = "curl")
 ```
 
-The data file can then be loaded into R, which gives a list with length two: the first element (`$elapsed_time`) gives the original download time and the second element (`$records`) is a `data.frame` of the PBDB occurrence data. We keep just this second part.
+The data file can then be loaded into R, which gives a list with length two: the first element (`$elapsed_time`) gives the original download time and the second element (`$records`) is a `data.frame` of the PBDB occurrence data. We keep just this second part. To save space, I've downloaded a version and stored this as a compressed `tar` file that needs to be expanded first with `untar`.
 
 ```{r read_pbdb_data}
-bivalve_pbdb_file <- "2022-03-18-bivalve_pbdb_occurrences.json"
-bivalve_pbdb_data <- jsonlite::fromJSON(bivalve_pbdb_file)$records |>
+bivalve_pbdb_file <- "2022-03-18-bivalve_pbdb_occurrences"
+untar(paste0(bivalve_pbdb_file, ".tgz"))
+bivalve_pbdb_data <- jsonlite::fromJSON(paste0(bivalve_pbdb_file, ".json"))$records |>
   as_tibble()
 ```
 
@@ -146,7 +149,7 @@ The same should be done for the columns we expect to have character strings in, 
 
 We can also do more fun things like plot the occurrences on a map. Useful guides to this are found in three blog posts [starting here](https://r-spatial.org//r/2018/10/25/ggplot2-sf.html). Working with mapping data is more involved than simple points, particularly if you want to change the projection away from the standard Mercator. The package `sf` (short for 'simple features', describing how the data is stored) can deal with all of this and then in plotting the projection can be changed. A rule of thumb is make sure to assign the coordinate reference system (CRS) when creating map objects.
 
-Package `rnaturalearth` has regularly-updated maps that should be better to use than in the built-in `maps` library. Here we download the country outlines in *sf* format.
+Package `rnaturalearth` has regularly updated maps that should be better to use than in the built-in `maps` library. Here we download the country outlines in *sf* format.
 
 ```{r map_occurrences}
 world_map <-
