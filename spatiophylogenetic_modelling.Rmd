@@ -10,7 +10,7 @@ The aim of this part of the project is to use occurrence data of bivalves from a
 
 
 ```{r renv_init, eval = FALSE}
-renv::init()
+renv::restore()
 ```
 
 *renv*, used above, sets up a *project environment* that stores the packages and versions used to make the project work. The idea of this is to enable you to go back to this after some time and get the project working again, no matter what's changed or been updated in the meantime. Similarly, send the project to a collaborator and they can set things up to be working quickly and easily without having to search through packages to install. I've already *initialized* this project, to get things going on your computer should a matter of opening R in this filter. *renv* will then install itself and any packages needed into its own library.
@@ -29,7 +29,7 @@ library(viridis)
 
 I'm rather opinionated about code and formatting. I think it's generally better to be strict about the packages you use and how you write the code. I tend to use *tidyverse* style and formatting, which has [a guide](https://r4ds.had.co.nz/index.html) written by Hadley Wickham, who's created some of the most used R packages. Google have a [style guide](https://google.github.io/styleguide/Rguide.html) for writing R code that I recommend following, but as a guide can and should be changed to meet your needs.
 
-I use *piping* a lot. This means passing the result of one function as the first argument of the next line. R has a native version shown as `|>`, but this is rather new (version 4.1.0). *tidyverse* and package *magrittr* has had a different version for while that looks like `%>%`, so you might see that online.
+I use *piping* a lot. This means passing the result of one function as the first argument of the next line. R has a native version shown as `|>`, but this is rather new (version 4.1.0). *tidyverse* and package *magrittr* has had a different version for while that looks like `%>%` and is probably the better to use, so you might see that online more often.
 
 This guide is written in [R Markdown](https://rmarkdown.rstudio.com/articles_intro.html), a text format that combines text and code and can be run easily in R Studio and other environments. I also tend to use *ggplot* for plotting, so have look [here](https://ggplot2-book.org) for the low-down on that package.
 
@@ -59,7 +59,7 @@ The data file can then be loaded into R, which gives a list with length two: the
 ```{r read_pbdb_data}
 bivalve_pbdb_file <- "2022-03-18-bivalve_pbdb_occurrences"
 untar(paste0(bivalve_pbdb_file, ".tgz"))
-bivalve_pbdb_data <- jsonlite::fromJSON(paste0(bivalve_pbdb_file, ".json"))$records |>
+bivalve_pbdb_data <- jsonlite::fromJSON(paste0(bivalve_pbdb_file, ".json"))$records %>%
   as_tibble()
 ```
 
@@ -90,9 +90,9 @@ It's a good check to have a quick look at the data to check its size and what di
 * How many records don't have accepted values?
 
 ```{r check_species}
-bivalve_pbdb_data |>
-  filter(rnk == 3) |>
-  group_by(tna) |>
+bivalve_pbdb_data %>%
+  filter(rnk == 3) %>%
+  group_by(tna) %>%
   summarize(n())
 ```
 
@@ -100,14 +100,14 @@ Or a more fun thing to plot the occurrences from different families.
 
 ```{r plot_family_occurrences}
 family_occurrences <-
-  bivalve_pbdb_data |>
-    filter(rnk == c(3, 4, 5)) |>
-    group_by(fml) |>
+  bivalve_pbdb_data %>%
+    filter(rnk == c(3, 4, 5)) %>%
+    group_by(fml) %>%
     summarize(family_occurrences = n())
-family_occurrences |>
+family_occurrences %>%
   ggplot(aes(x = reorder(fml, desc(family_occurrences)), y = family_occurrences)) +
     geom_col()
-family_occurrences |>
+family_occurrences %>%
   slice_max(family_occurrences, n = 10)
 ```
 
@@ -130,7 +130,7 @@ check_numeric_column <- function(column, data) {
   }
 }
 
-c("lng", "lat", "rnk") |>
+c("lng", "lat", "rnk") %>%
   walk(check_numeric_column, data = bivalve_pbdb_data)
 ```
 
@@ -138,7 +138,7 @@ Assuming this above comes out tickety-boo, then we can simply replace and reform
 
 ```{r reformatting_numeric_data}
 bivalve_cleaned <-
-  bivalve_pbdb_data |>
+  bivalve_pbdb_data %>%
   mutate(across(c(rnk, lng, lat), as.numeric))
 ```
 
@@ -160,9 +160,9 @@ Next, convert the occurrences locations into an *sf* object also. I've filtered 
 
 ```{r get_occurrence_points}
 occurrences_to_plot <-
-  bivalve_cleaned |>
-  filter(rnk == 3) |>
-  slice_sample(n = 1000) |>
+  bivalve_cleaned %>%
+  filter(rnk == 3) %>%
+  slice_sample(n = 1000) %>%
   st_as_sf(coords = c("lng", "lat"), crs = 4326, agr = "constant")
 ```
 
