@@ -1,6 +1,7 @@
 ---
 title: "Spatiophylogenetic modelling: the end-Cretaceous extinction"
-...
+bibliography: references.bib
+---
 
 # Introduction
 
@@ -17,6 +18,7 @@ renv::restore()
 
 ```{r packages}
 library(jsonlite)
+library(furrr)
 library(ggthemes)
 library(mapproj)
 library(rnaturalearth)
@@ -139,6 +141,7 @@ Assuming this above comes out tickety-boo, then we can simply replace and reform
 ```{r reformatting_numeric_data}
 bivalve_cleaned <-
   bivalve_pbdb_data %>%
+  filter(str_detect(jev, "marine|shelf|oceanic")) %>%
   mutate(across(c(rnk, lng, lat), as.numeric))
 ```
 
@@ -174,9 +177,10 @@ ggplot() +
   geom_sf(data = occurrences_to_plot, mapping = aes(colour = fml)) +
   scale_colour_viridis(discrete = TRUE) +
   coord_sf(crs = "+proj=moll") +
-  theme_map() +
+  theme_bw() +
   theme(
     legend.position = "none",
+    panel.border = element_blank()
   )
 ```
 
@@ -186,3 +190,134 @@ ggplot() +
 * Can you identify occurrences that have erroneous names? 
 * What species go extinct across the Cretaceous–Palaeogene boundary?
 * Have a look at [this GitHub repository](https://github.com/benjaminmoon/palaeomap_example) showing how to get data and plot palaeogeographical maps. Can you do the same for occurrences in the Cretaceous and Palaeogene.
+
+## Palaeogeographical map ##
+
+We use the palaeogeographical reconstructions from the combined Muller2019-Young2019-Cao2020 (MYC) model provided by GPlates (<https://www.gplates.org>) [@Muller2019T; @Young2019GF; @Cao2020GR; @Torsvik2019GGG]. This provides a nice visualization of the palaeogeography including locations of shallow marine environments, land, mountains, and ice caps. We exported these four layers reconstructed to 68 Ma in the latest Cretaceous and plot them as a base map with modern coastlines indicated. The data files for the reconstructions are provided with GPlates or can be downloaded from [Earthbyte](http://www.earthbyte.org/gplates-2-3-software-and-data-sets/).
+
+```{r fig.cap = "Palaeogeographical reconstruction in the latest Cretaceous (68 Ma), with modern coastlines indicated, based on the environmental reonctrution of @Cao2017Bb and the combined rotaion models of @Muller2019T, @Young2019GF, and @Cao2020GR, with correction to the Pacific by @Torsvik2019GGG."}
+palaeogeo_file_layers <-
+  c("Shallow marine" = "sm", "Landmass" = "lm", "Mountain" = "m", "Ice cap" = "i")
+
+read_geojson <-
+  function(prefix, filename = "./data/palaeogeographical_reconstructions/id_402_2_reconstructed_68.00Ma.geojson") {
+  # Read a list of GeoJSON files and combine into a single sf collection.
+  #
+  # Arguments:
+  #   prefix: layer prefixes for the data files ("sm", "lm", "m", "i") taken from Cao et al. (2017).
+  #   filename: rest of GeoJSON file name.
+  #
+  # Returns:
+  #   A single feature collection with geometries and ID column ("id").
+  file <- str_replace(filename, "id", prefix)
+  st_read(file) %>%
+    add_column(id = prefix)
+}
+
+map_data <- palaeogeo_file_layers %>%
+  map(read_geojson) %>%
+  do.call(rbind, .) %>%
+  mutate(
+    id = factor(id, levels = palaeogeo_file_layers, labels = names(palaeogeo_file_layers))
+  )
+
+base_map <-
+  ggplot() +
+    geom_sf(data = map_data, aes(fill = id), colour = NA) +
+    scale_discrete_manual(
+      # colours for base map layers
+      values =
+        c(
+          "Ice cap"        = "#DAD3FF",
+          "Landmass"       = "#FFD23A",
+          "Mountain"       = "#FF8D51",
+          "Shallow marine" = "#45D8FF"
+        ),
+      aesthetics = c("fill"),
+      name = "Palaeogeography"
+    ) +
+    theme_bw() +
+    theme(panel.border = element_blank())
+
+modern_coastlines <-
+  st_read("./data/palaeogeographical_reconstructions/Global_EarthByte_GPlates_PresentDay_Coastlines_Polyline_reconstructed_68.00Ma.geojson")
+
+base_map +
+  geom_sf(data = modern_coastlines, colour = "grey60") +
+  coord_sf(crs = "+proj=robin")
+```
+
+## Rotation modern locality coordinates
+
+We have the modern localities for our bivalve occurrences, but need to rotate these to the position they were in at the end of the Cretaceous (68 Ma) to get their palaeocoordinates. The GPlates Web Service can do this online or through docker, but doesn't offer the rotation model used for the combined MYC palaeogeographical reconstruction, and can be quite slow to do many requests — and we have tens-of-thousands of bivalve occurrences. Instead, we field this out to [pyGPlates](https://www.gplates.org/docs/pygplates/index.html). This step of reconstruction has been done, so the file `./data/reconstructed_68Ma.gmt` can be read in directly.
+
+```{r}
+modern_coords <-
+  bivalve_cleaned %>%
+  filter(lag > 66 & lag < 75) %>%
+  select(c("lng", "lat")) %>%
+  st_as_sf(coords = c("lng", "lat"), crs = 4326, agr = "constant")
+
+st_write(modern_coords, "./data/kpg_bivalve_modern_coordinates.gmt", driver = "OGR_GMT")
+```
+
+Instructions to install pyGPlates can be found [here](https://www.gplates.org/docs/pygplates/index.html), including the necessary Python packages (specifically `proj`). [Anaconda](https://www.anaconda.com)/[Miniconda](https://docs.conda.io/en/latest/miniconda.html) is a good Python managing system in which you can also create project environments. The code in the python blocks below can be run in a python environment — separate to the main R environment — or can be run directly within R using the *reticulate* package [@Ushey2022].
+
+There are two steps to reconstructing the palaeocoordinates: (1) assigning the localities to the static polygons (i.e. plate fragments thay move with continental drift), and (2) rotating the plate fragments and localities to the palaeolocations. First we assign the points and output a GPML file that can be visualized in GPlates directly.
+
+```{python assign_locality_polygons, eval = FALSE}
+import pygplates
+
+# Load one or more rotation files into a rotation model.
+rotation_model = pygplates.RotationModel('./data/palaeogeographical_reconstructions/Muller2019-Young2019-Cao2020_CombinedRotations.rot')
+
+# Filename for the static plate boundaries
+static_polygons_filename = './data/palaeogeographical_reconstructions/Global_EarthByte_GPlates_PresentDay_StaticPlatePolygons.gpmlz'
+
+# Load some features.
+point_features = pygplates.FeatureCollection('./data/kpg_bivalve_modern_coordinates.gmt')
+
+# Output filename for assigned points
+assigned_points_output = './data/bivalve_assigned_locations.gpml'
+
+# Place point occurrences onto plate static polygons
+assigned_points = pygplates.partition_into_plates(
+    static_polygons_filename,
+    rotation_model,
+    point_features,
+    properties_to_copy = [
+        pygplates.PartitionProperty.reconstruction_plate_id,
+        pygplates.PartitionProperty.valid_time_period
+    ]
+)
+
+# Write assigned points to a GPML file that can be used in GPlates
+assigned_points_collection = pygplates.FeatureCollection(assigned_points)
+assigned_points_collection.write(assigned_points_output)
+```
+
+Next we rotate the palaeolocations to 68 Ma and export an OGR-GMT file of these palaeocoordinates.
+
+```{python reconstruct_palaeocoordinates, eval = FALSE}
+# Reconstruct features to this geological time.
+reconstruction_time = 68
+
+# The filename of the exported reconstructed geometries.
+# It's a shapefile called 'reconstructed_68Ma.shp'.
+export_filename = 'reconstructed_{0}Ma.gmt'.format(reconstruction_time)
+
+# Reconstruct the features to the reconstruction time and export them to a shapefile.
+pygplates.reconstruct(assigned_points_collection, rotation_model, export_filename, reconstruction_time)
+```
+
+These converted locations can be read back into R and plotted over the base map.
+
+```{r read_palaeo_coords, fig.cap = "Palaeolocations of marine bivalve occurrences in the latest Cretaceous (70–66 Ma) plotted on a palaeogeographical map at 68 Ma.}
+palaeo_coords <-
+  st_read("./data/reconstructed_68Ma.gmt")
+
+base_map +
+  geom_sf(data = palaeo_coords) +
+  coord_sf(crs = "+proj=robin")
+```
+
