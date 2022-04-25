@@ -14,14 +14,25 @@ The aim of this part of the project is to use occurrence data of bivalves from a
 renv::restore()
 ```
 
-*renv*, used above, sets up a *project environment* that stores the packages and versions used to make the project work. The idea of this is to enable you to go back to this after some time and get the project working again, no matter what's changed or been updated in the meantime. Similarly, send the project to a collaborator and they can set things up to be working quickly and easily without having to search through packages to install. I've already *initialized* this project, to get things going on your computer should a matter of opening R in this filter. *renv* will then install itself and any packages needed into its own library.
+*Renv*, used above, sets up a *project environment* that stores the packages and versions used to make the project work. The idea of this is to enable you to go back to this after some time and get the project working again, no matter what's changed or been updated in the meantime. Similarly, send the project to a collaborator and they can set things up to be working quickly and easily without having to search through packages to install. I've already *initialized* this project, to get things going on your computer should a matter of opening R in this filter. *Renv* will then install itself and any packages needed into its own library.
+
+The following packages are used:
+
+- *CoordinateCleaner*: for checking occurrence data quality [@Zizka2019MEE] (requires [proj](https://proj.org/download.html) and [gdal](https://gdal.org/download.html)).
+- *countrycode*: for cleaning occurrence data [@ArelBundock2018JOSS].
+- *jsonlite*: reading JSON-structured data [@Ooms2014].
+- *rnaturalearth*: country outlines for plotting maps [@South2017].
+- *rnaturaleearthdata*: for checking occurrence localities [@South2017a].
+- *sf*: wrangling geometry and map data [@Pebesma2018RJ].
+- *tidyverse*: data wrangling pipelines [@Wickham2019JOSS].
+- *viridis*: colour blind-friendly plotting [@Garnier2021].
 
 ```{r packages}
+library(CoordinateCleaner)
+library(countrycode)
 library(jsonlite)
-library(furrr)
-library(ggthemes)
-library(mapproj)
 library(rnaturalearth)
+library(rnaturalearthdata)
 library(sf)
 library(tidyverse)
 library(viridis)
@@ -33,14 +44,14 @@ I'm rather opinionated about code and formatting. I think it's generally better 
 
 I use *piping* a lot. This means passing the result of one function as the first argument of the next line. R has a native version shown as `|>`, but this is rather new (version 4.1.0). *tidyverse* and package *magrittr* has had a different version for while that looks like `%>%` and is probably the better to use, so you might see that online more often.
 
-This guide is written in [R Markdown](https://rmarkdown.rstudio.com/articles_intro.html), a text format that combines text and code and can be run easily in R Studio and other environments. I also tend to use *ggplot* for plotting, so have look [here](https://ggplot2-book.org) for the low-down on that package.
+This guide is written in [R Markdown](https://rmarkdown.rstudio.com/articles_intro.html), a text format that combines text and code and can be run easily in R Studio and other environments. I also tend to use *ggplot* for plotting, so have a look [here](https://ggplot2-book.org) for the low-down on that package.
 
 
 # Acquiring data
 
 The data come from the [Paleobiology Database](https://paleobiodb.org/#/) (PBDB). Occurrences are downloaded though their [API](https://paleobiodb.org/data1.2/).
 
-First we can download the data as a JSON file and save this to disc: this is our master data set. For this, I've gathered occurrences of Bivalvia from the Cretaceous and Paleogene with all of the occurrence, geographical, systematic, and ecological data.
+First we can download the data as a JSON file and save this to disc: this is our master data set. For this, I've gathered occurrences of Bivalvia from the Cretaceous and Palaeogene with all of the occurrence, geographical, systematic, and ecological data. This only need be done once (and I've included the file in the repository already).
 
 ```{r download_pbdb_data, eval = FALSE}
 bivalve_pbdb_url <-
@@ -58,11 +69,12 @@ download.file(bivalve_pbdb_url, bivalve_pbdb_file, method = "curl")
 
 The data file can then be loaded into R, which gives a list with length two: the first element (`$elapsed_time`) gives the original download time and the second element (`$records`) is a `data.frame` of the PBDB occurrence data. We keep just this second part. To save space, I've downloaded a version and stored this as a compressed `tar` file that needs to be expanded first with `untar`.
 
-```{r read_pbdb_data}
+```{r read_pbdb_data, cache = TRUE}
 bivalve_pbdb_file <- "2022-03-18-bivalve_pbdb_occurrences"
 untar(paste0(bivalve_pbdb_file, ".tgz"))
 bivalve_pbdb_data <- jsonlite::fromJSON(paste0(bivalve_pbdb_file, ".json"))$records %>%
-  as_tibble()
+  as_tibble() %>%
+  mutate(across(c(rnk, lng, lat), as.numeric))
 ```
 
 We won't need data from all the columns, but the important few are:
@@ -115,42 +127,156 @@ family_occurrences %>%
 
 ## Data quality ##
 
-Now we can do a more thorough look through the data to check that it's correct, or at least in the form we expect it to be. First is the relatively easy one: checking for numbers in columns that should have the, such as rnk, lng, and lat. On import this column is started as a character string in the tibble. We can check whether any of the records are not proper numbers by searching for characters not found in a number: i.e. not digits, decimal points, or minus signs.
+Now we can do a more thorough look through the data to check that it's correct, or at least in the form we expect it to be. Fortunately there is a handy package, *CoordinateCleaner*, that can help with this. It checks for coordinates that are present in the middle of countries or at (0, 0) — implying they have imprecise, or generic location data — or those occurrences that are spatiotemporal outliers — indicating they may not be correct identifications. Q guide through these checks is [here](https://docs.ropensci.org/CoordinateCleaner/articles/Cleaning_PBDB_fossils_with_CoordinateCleaner.html).
 
-```{r data_cleaning}
-# search for strings that don't contain a digit, full stop/decimal point, or hyphen/minus, i.e. those that aren't a number
-number_as_character_regexp <- "[^[[:digit:]]\\.\\-]"
+### Spatial checks ###
 
-check_numeric_column <- function(column, data) {
-  column_vector <- pull(data, column)
-  string_match <- str_which(column_vector, number_as_character_regexp)
-  if (length(string_match) == 0) {
-    print(paste(column, ": All items are (probably) numbers."))
-  } else {
-    print(paste(column, ": Some items (probably) aren't numbers."))
-    string_match
-  }
-}
 
-c("lng", "lat", "rnk") %>%
-  walk(check_numeric_column, data = bivalve_pbdb_data)
+This first step checks that the coordinates are included as numbers and that there aren't any potential errors — such as matching latitude and longitude values. It's recommended to also check which record, if any, are flagged by adding `value = "flagged"` to all commands.
+
+```{r check_occ_coordinate_validity}
+occ_checking <-
+  bivalve_pbdb_data %>%
+  cc_val(lat = "lat", lon = "lng") %>%
+  cc_equ(lat = "lat", lon = "lng")
 ```
 
-Assuming this above comes out tickety-boo, then we can simply replace and reformat those columns to numeric values. It's always a good plan to create a new object doing this so that you don't lose the original data, just in case things go wrong later.
+Next we check for the location proximity to country centres, indicating imprecision.
 
-```{r reformatting_numeric_data}
+```{r check_occ_coordinate_precision}
+occ_precision <-
+  occ_checking %>%
+  cc_cen(lat = "lat", lon = "lng", value = "flagged")
+
+occ_precision_fl <-
+  bivalve_pbdb_data %>%
+  filter(!occ_precision)
+```
+
+Then we check whether occurrences are located within the country they are meant to come from. This requires using ISO 3-letter country codes, while the PBDB uses 2-letter codes, so some conversion is needed; it also uses UK while the country codes is GB and GBR.
+
+```{r check_occ_country_location}
+# Add record for UK -> GBR
+cs_ma <- "GBR"
+names(cs_ma) <- "UK"
+occ_checking <-
+  occ_checking %>%
+  mutate(
+    cc_iso3 = countrycode(cc2, origin = "iso2c", destination = "iso3c", custom_match = cs_ma)
+  )
+
+occ_country <-
+  occ_checking %>%
+  cc_coun(lat = "lat", lon = "lng", iso3 = "cc_iso3", value = "flagged")
+
+occ_country_fl <-
+  bivalve_pbdb_data %>%
+  filter(!occ_country)
+```
+
+Fourth, is to check against host institutions on the Global Biodiversity Interchange Facility, in case the locations are listed as that rather than the in-the-field locality.
+
+```{r check_occ_gbif_institute}
+occ_inst <-
+  occ_checking %>%
+  cc_inst(lat = "lat", lon = "lng", value = "flagged")
+
+occ_gbif <-
+  occ_checking %>%
+  cc_gbif(lat = "lat", lon = "lng", value = "flagged")
+```
+
+And finally, check for records at (0, 0).
+
+```{r check_occ_zero_zero}
+occ_zero_zero <-
+  occ_checking %>%
+  cc_zero(lat = "lat", lon = "lng", value = "flagged")
+```
+
+### Temporal checks ###
+
+Alongside check that occurrences are not at potentially imprecise/incorrect localities, also see whether any are erroneous separated in time is useful. First removing occurrences without ages.
+
+```{r check_occ_empty_ages}
+occ_empty_ages <-
+  occ_checking %>%
+    filter(
+      !is.na(lag),
+      !is.na(eag)
+    ) %>%
+  cf_equal(min_age = "lag", max_age = "eag", value = "flagged")
+```
+
+Next, check on the precision of dating as the very imprecisely dated occurrences can be readily excluded.
+
+```{r check_occ_dating_precision, fig.cap = "Histogram of Bivalvia occurrence dating ranges from the Paleobiology Database."}
+bivalve_pbdb_data %>%
+  mutate(dating_precision = eag - lag) %>%
+  ggplot(aes(dating_precision)) +
+    geom_histogram()
+```
+
+We're mostly doing okay, with precision less than 20 Ma, but some extend all the way up to 140 Ma dates; we don't want those!*CoordinateCleaner* also provides a way to clean based on range comparisons between taxa and comparing similarities — excluding occurrences based on the range of differences of dating precision rather than just setting an arbitrary cutoff. But an absolute value can sometimes be useful: in this case using 35 Ma as the length of the Late Cretaceous. If occurrences can't certainly be dated within that time frame than we can readily exclude them. As a check of how removing these occurrences affects the spread of ranges, we plot the histogram again.
+
+```{r check_occ_exclude_dates, fig.cap = "Histogram of cleaned occurrence dating ranges."}
+occ_ranges_total <-
+  occ_checking %>%
+  cf_range(taxon = "", min_age = "lag", max_age = "eag", value = "flagged")
+
+occ_ranges_taxon <-
+  occ_checking %>%
+  cf_range(taxon = "tna", min_age = "lag", max_age = "eag", value = "flagged")
+
+occ_ranges_absolute <-
+  occ_checking %>%
+  cf_range(taxon = "tna", min_age = "lag", max_age = "eag", method = "time", max_range = 35, value = "flagged")
+
+bivalve_pbdb_data %>%
+  filter(occ_ranges_total & occ_ranges_taxon & occ_ranges_absolute) %>%
+  mutate(dating_precision = eag - lag) %>%
+  ggplot(aes(dating_precision)) +
+    geom_histogram(bins = 50)
+```
+
+Most of the occurrences in this data set can be dated within 10 Ma, so that's good.
+
+Now for checking outliers in time and space — those that are much separated from their main cluster and so may be a misidentification.
+
+```{r check_occ_outliers}
+# this function exhausted memory, so I don't run it
+# occ_outliers_total <-
+#   occ_checking %>%
+#   cf_outl(taxon = "", lat = "lat", lon = "lng", min_age = "lag", max_age = "eag", value = "flagged")
+
+occ_outliers_taxon <-
+  occ_checking %>%
+  cf_outl(taxon = "tna", lat = "lat", lon = "lng", min_age = "lag", max_age = "eag", value = "flagged")
+```
+
+## Excluding questionable data
+
+The above functions let you go through and check the removed occurrences for the reasons and to make sure they should be removed. This code below does all the cleaning automatically using the helper function `clean_fossils`.
+
+```{r occ_full_cleaning, cache = TRUE}
+cs_ma <- "GBR"
+names(cs_ma) <- "UK"
+bivalve_pbdb_data <-
+  bivalve_pbdb_data %>%
+  mutate(
+    cc_iso3 = countrycode(cc2, origin = "iso2c", destination = "iso3c", custom_match = cs_ma)
+  )
+
 bivalve_cleaned <-
   bivalve_pbdb_data %>%
-  filter(str_detect(jev, "marine|shelf|oceanic")) %>%
-  mutate(across(c(rnk, lng, lat), as.numeric))
+  clean_fossils(taxon = "tna", min_age = "lag", max_age = "eag", lon = "lng", lat = "lat", countries = "cc_iso3", value = "clean") %>%
+  filter(str_detect(jev, "marine|shelf|oceanic"))
 ```
-
-The same should be done for the columns we expect to have character strings in, i.e. the accepted name and family column.
 
 
 # Mapping data #
 
-We can also do more fun things like plot the occurrences on a map. Useful guides to this are found in three blog posts [starting here](https://r-spatial.org//r/2018/10/25/ggplot2-sf.html). Working with mapping data is more involved than simple points, particularly if you want to change the projection away from the standard Mercator. The package `sf` (short for 'simple features', describing how the data is stored) can deal with all of this and then in plotting the projection can be changed. A rule of thumb is make sure to assign the coordinate reference system (CRS) when creating map objects.
+We can also do more fun things like plot the occurrences on a map. Useful guides to this are found in three blog posts [starting here](https://r-spatial.org//r/2018/10/25/ggplot2-sf.html). Working with mapping data is more involved than simple points, particularly if you want to change the projection away from the standard Mercator. The package *sf* (short for 'simple features', describing how the data is stored) can deal with all of this and then in plotting the projection can be changed. A rule of thumb is make sure to assign the coordinate reference system (CRS) when creating map objects.
 
 Package `rnaturalearth` has regularly updated maps that should be better to use than in the built-in `maps` library. Here we download the country outlines in *sf* format.
 
@@ -169,14 +295,16 @@ occurrences_to_plot <-
   st_as_sf(coords = c("lng", "lat"), crs = 4326, agr = "constant")
 ```
 
-Now, we put these together into the plot using the `geom_sf` function to build up the layers: map outline first, then points over the top. The colour scale is good for colour-blind people, so is a good option to prefer. Here I modify the map projection using `coord_sf(crs)` into the Mollweide projection. I need to work out about adding a border and grid lines at this point.
+Now, we put these together into the plot using the `geom_sf` function to build up the layers: map outline first, then points over the top. The colour scale is good for colour-blind people, so is a good option to prefer. Here I modify the map projection using `coord_sf(crs)` into the [Robinson projection](https://en.wikipedia.org/wiki/Robinson_projection).
 
-```{r plot_occurrence_map}
+The essence of plotting with `geom_sf` is to add the different layers one by one. In this case, the first call plots the country outlines then the second line plots the occurrence points over the top; `scale_colour_viridis` is a good set of plotting colours to use as they are colour blind-friendly; and the final theme options remove the border and the grey background usual in *ggplot* plots.
+
+```{r plot_occurrence_map, fig.cap = "Map of Bivalvia localities from the Cretaceous and Palaeogene.", fig.width = 7, fig.height = 4}
 ggplot() +
   geom_sf(data = world_map, inherit.aes = FALSE) +
   geom_sf(data = occurrences_to_plot, mapping = aes(colour = fml)) +
   scale_colour_viridis(discrete = TRUE) +
-  coord_sf(crs = "+proj=moll") +
+  coord_sf(crs = "+proj=robin") +
   theme_bw() +
   theme(
     legend.position = "none",
@@ -184,18 +312,13 @@ ggplot() +
   )
 ```
 
-# Things to do #
-
-* Look at the quality of the data: how many families? which ones are now extinct?
-* Can you identify occurrences that have erroneous names? 
-* What species go extinct across the Cretaceous–Palaeogene boundary?
-* Have a look at [this GitHub repository](https://github.com/benjaminmoon/palaeomap_example) showing how to get data and plot palaeogeographical maps. Can you do the same for occurrences in the Cretaceous and Palaeogene.
-
 ## Palaeogeographical map ##
 
-We use the palaeogeographical reconstructions from the combined Muller2019-Young2019-Cao2020 (MYC) model provided by GPlates (<https://www.gplates.org>) [@Muller2019T; @Young2019GF; @Cao2020GR; @Torsvik2019GGG]. This provides a nice visualization of the palaeogeography including locations of shallow marine environments, land, mountains, and ice caps. We exported these four layers reconstructed to 68 Ma in the latest Cretaceous and plot them as a base map with modern coastlines indicated. The data files for the reconstructions are provided with GPlates or can be downloaded from [Earthbyte](http://www.earthbyte.org/gplates-2-3-software-and-data-sets/).
+We use the palaeogeographical reconstructions from the combined Muller2019-Young2019-Cao2020 (MYC) model provided by GPlates (<https://www.gplates.org>) [@Muller2019T; @Young2019GF; @Cao2022GR; @Torsvik2019GGG]. This provides a nice visualization of the palaeogeography including locations of shallow marine environments, land, mountains, and ice caps. We exported these four layers reconstructed to 68 Ma in the latest Cretaceous and plot them as a base map with modern coastlines indicated. The data files for the reconstructions are provided with GPlates or can be downloaded from [Earthbyte](http://www.earthbyte.org/gplates-2-3-software-and-data-sets/).
 
-```{r fig.cap = "Palaeogeographical reconstruction in the latest Cretaceous (68 Ma), with modern coastlines indicated, based on the environmental reonctrution of @Cao2017Bb and the combined rotaion models of @Muller2019T, @Young2019GF, and @Cao2020GR, with correction to the Pacific by @Torsvik2019GGG."}
+The different layers (shallow marine, land, mountain, ice cap) are included in four files in the `./data/palaeogeographical_reconstructions` directory and read into a list then combined using the functions below. Combining these data sets into one makes it quicker to plot and colour the different layers in the base map.
+
+```{r palaeogeo_base_map, fig.cap = "Palaeogeographical reconstruction in the latest Cretaceous (68 Ma), with modern coastlines indicated, based on the environmental reconstrution of @Cao2017Bb and the combined rotaion models of @Muller2019T, @Young2019GF, and @Cao2022GR, with correction to the Pacific by @Torsvik2019GGG.", fig.width = 9, fig.height = 4}
 palaeogeo_file_layers <-
   c("Shallow marine" = "sm", "Landmass" = "lm", "Mountain" = "m", "Ice cap" = "i")
 
@@ -209,17 +332,18 @@ read_geojson <-
   #
   # Returns:
   #   A single feature collection with geometries and ID column ("id").
-  file <- str_replace(filename, "id", prefix)
-  st_read(file) %>%
+  str_replace(filename, "id", prefix) %>%
+    st_read() %>%
     add_column(id = prefix)
 }
 
-map_data <- palaeogeo_file_layers %>%
-  map(read_geojson) %>%
-  do.call(rbind, .) %>%
-  mutate(
-    id = factor(id, levels = palaeogeo_file_layers, labels = names(palaeogeo_file_layers))
-  )
+map_data <-
+  palaeogeo_file_layers %>%
+    purrr::map(read_geojson) %>%
+    do.call(rbind, .) %>%
+    mutate(
+      id = factor(id, levels = palaeogeo_file_layers, labels = names(palaeogeo_file_layers))
+    )
 
 base_map <-
   ggplot() +
@@ -247,16 +371,16 @@ base_map +
   coord_sf(crs = "+proj=robin")
 ```
 
-## Rotation modern locality coordinates
+## Rotating modern locality coordinates
 
-We have the modern localities for our bivalve occurrences, but need to rotate these to the position they were in at the end of the Cretaceous (68 Ma) to get their palaeocoordinates. The GPlates Web Service can do this online or through docker, but doesn't offer the rotation model used for the combined MYC palaeogeographical reconstruction, and can be quite slow to do many requests — and we have tens-of-thousands of bivalve occurrences. Instead, we field this out to [pyGPlates](https://www.gplates.org/docs/pygplates/index.html). This step of reconstruction has been done, so the file `./data/reconstructed_68Ma.gmt` can be read in directly.
+We have the modern localities for our bivalve occurrences, but need to *rotate* these to their position at the end of the Cretaceous (68 Ma) to get their palaeocoordinates. The GPlates Web Service can do this online or through docker, but doesn't offer the rotation model used for the combined MYC palaeogeographical reconstruction, and can be quite slow to do many requests — and we have tens-of-thousands of bivalve occurrences. Instead, we field this out to [pyGPlates](https://www.gplates.org/docs/pygplates/index.html). This step of reconstruction has been done, so the file `./data/reconstructed_68Ma.gmt` can be read in directly.
 
-```{r}
+```{r write_bivalve_coords, eval = FALSE}
 modern_coords <-
   bivalve_cleaned %>%
   filter(lag > 66 & lag < 75) %>%
   select(c("lng", "lat")) %>%
-  st_as_sf(coords = c("lng", "lat"), crs = 4326, agr = "constant")
+  st_as_sf(coords = c("lng", "lat"), crs = 4326)
 
 st_write(modern_coords, "./data/kpg_bivalve_modern_coordinates.gmt", driver = "OGR_GMT")
 ```
@@ -304,7 +428,7 @@ reconstruction_time = 68
 
 # The filename of the exported reconstructed geometries.
 # It's a shapefile called 'reconstructed_68Ma.shp'.
-export_filename = 'reconstructed_{0}Ma.gmt'.format(reconstruction_time)
+export_filename = './data/reconstructed_{0}Ma.gmt'.format(reconstruction_time)
 
 # Reconstruct the features to the reconstruction time and export them to a shapefile.
 pygplates.reconstruct(assigned_points_collection, rotation_model, export_filename, reconstruction_time)
@@ -312,7 +436,7 @@ pygplates.reconstruct(assigned_points_collection, rotation_model, export_filenam
 
 These converted locations can be read back into R and plotted over the base map.
 
-```{r read_palaeo_coords, fig.cap = "Palaeolocations of marine bivalve occurrences in the latest Cretaceous (70–66 Ma) plotted on a palaeogeographical map at 68 Ma.}
+```{r read_palaeo_coords, fig.cap = "Palaeolocations of marine bivalve occurrences in the latest Cretaceous (70–66 Ma) plotted on a palaeogeographical map at 68 Ma.", fig.width = 9, fig.height = 4}
 palaeo_coords <-
   st_read("./data/reconstructed_68Ma.gmt")
 
@@ -321,3 +445,5 @@ base_map +
   coord_sf(crs = "+proj=robin")
 ```
 
+
+# References
