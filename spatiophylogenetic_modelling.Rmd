@@ -72,7 +72,8 @@ The data file can then be loaded into R, which gives a list with length two: the
 ```{r read_pbdb_data, cache = TRUE}
 bivalve_pbdb_file <- "2022-03-18-bivalve_pbdb_occurrences"
 untar(paste0(bivalve_pbdb_file, ".tgz"))
-bivalve_pbdb_data <- jsonlite::fromJSON(paste0(bivalve_pbdb_file, ".json"))$records %>%
+bivalve_pbdb_data <-
+  jsonlite::fromJSON(paste0(bivalve_pbdb_file, ".json"))$records %>%
   as_tibble() %>%
   mutate(across(c(rnk, lng, lat), as.numeric))
 ```
@@ -119,7 +120,9 @@ family_occurrences <-
     group_by(fml) %>%
     summarize(family_occurrences = n())
 family_occurrences %>%
-  ggplot(aes(x = reorder(fml, desc(family_occurrences)), y = family_occurrences)) +
+  ggplot(
+    aes(x = reorder(fml, desc(family_occurrences)), y = family_occurrences)
+  ) +
     geom_col()
 family_occurrences %>%
   slice_max(family_occurrences, n = 10)
@@ -156,13 +159,18 @@ occ_precision_fl <-
 Then we check whether occurrences are located within the country they are meant to come from. This requires using ISO 3-letter country codes, while the PBDB uses 2-letter codes, so some conversion is needed; it also uses UK while the country codes is GB and GBR.
 
 ```{r check_occ_country_location}
-# Add record for UK -> GBR
-cs_ma <- "GBR"
-names(cs_ma) <- "UK"
+# Add record for UK -> GBR, AA -> ATA [Antarctica]
+cs_ma <- c("GBR", "ATA")
+names(cs_ma) <- c("UK", "AA")
 occ_checking <-
   occ_checking %>%
   mutate(
-    cc_iso3 = countrycode(cc2, origin = "iso2c", destination = "iso3c", custom_match = cs_ma)
+    cc_iso3 = countrycode(
+        cc2,
+        origin = "iso2c",
+        destination = "iso3c",
+        custom_match = cs_ma
+      )
   )
 
 occ_country <-
@@ -230,7 +238,11 @@ occ_ranges_taxon <-
 
 occ_ranges_absolute <-
   occ_checking %>%
-  cf_range(taxon = "tna", min_age = "lag", max_age = "eag", method = "time", max_range = 35, value = "flagged")
+  cf_range(
+    taxon = "tna",
+    min_age = "lag", max_age = "eag",
+    method = "time", max_range = 35, value = "flagged"
+  )
 
 bivalve_pbdb_data %>%
   filter(occ_ranges_total & occ_ranges_taxon & occ_ranges_absolute) %>%
@@ -247,7 +259,12 @@ Now for checking outliers in time and space — those that are much separate
 # this function exhausted memory, so I don't run it
 # occ_outliers_total <-
 #   occ_checking %>%
-#   cf_outl(taxon = "", lat = "lat", lon = "lng", min_age = "lag", max_age = "eag", value = "flagged")
+#   cf_outl(
+      # taxon = "",
+      # lat = "lat", lon = "lng",
+      # min_age = "lag", max_age = "eag",
+      # value = "flagged"
+    # )
 
 occ_outliers_taxon <-
   occ_checking %>%
@@ -259,8 +276,8 @@ occ_outliers_taxon <-
 The above functions let you go through and check the removed occurrences for the reasons and to make sure they should be removed. This code below does all the cleaning automatically using the helper function `clean_fossils`.
 
 ```{r occ_full_cleaning, cache = TRUE}
-cs_ma <- "GBR"
-names(cs_ma) <- "UK"
+cs_ma <- c("GBR", "ATA")
+names(cs_ma) <- c("UK", "AA")
 bivalve_pbdb_data <-
   bivalve_pbdb_data %>%
   mutate(
@@ -273,6 +290,69 @@ bivalve_cleaned <-
   filter(str_detect(jev, "marine|shelf|oceanic"))
 ```
 
+## Checking taxonomy
+
+A final set of things to check is for names that might have misspellings or missing taxonomy data.
+
+```{r}
+library(stringdist)
+
+str_dist_matrix <-
+  bivalve_cleaned |>
+  filter(rnk == 3) |>
+  pull(tna) |>
+  unique() |>
+  tolower() |>
+  stringdistmatrix(useNames = "strings", method = "lcs") |>
+  as.matrix()
+
+str_indices <-
+  tibble(
+    pos_n       = which(str_dist_matrix <= 4 & str_dist_matrix > 0),
+    row_n       = pos_n %/% dim(str_dist_matrix)[2],
+    row_n_fixed = replace(row_n, row_n == 0, dim(str_dist_matrix)[2]) + 1, # need to add 1 to offset mod(1583) = 0
+    col_n       = pos_n %%  dim(str_dist_matrix)[1],
+    col_n_fixed = replace(col_n, col_n == 0, dim(str_dist_matrix)[1]),
+    row         = rownames(str_dist_matrix)[row_n_fixed],
+    col         = colnames(str_dist_matrix)[col_n_fixed],
+    distance    = str_dist_matrix[pos_n]
+  )
+str_indices
+```
+
+We can check what families are in included in the data quite easily but *pulling* this column out and finding unique records. 
+
+```{r}
+bivalve_cleaned |>
+  pull(fml) |>
+  unique()
+```
+
+We see that there are two errant values: "NO_FAMILY_SPECIFIED" and `NA`.
+
+```{r}
+errant_taxonomy <-
+  bivalve_cleaned |>
+  filter(fml == "NO_FAMILY_SPECIFIED" | is.na(fml)) |>
+  select(tna, fml, rnk)
+print(errant_taxonomy, n = Inf)
+errant_taxonomy |>
+  group_by(rnk) |>
+  summarize(n = n())
+
+errant_taxonomy |> pull(tna) |> unique()
+```
+
+This finds `r nrow(errant_taxonomy)` records that wither have no family or `NA`. Most are identified to family level, but a similar number are species. It turns out that those with `NA` in the family are only identified to a higher taxonomic level, so we can leave them alone. 
+
+```{r}
+errant_families <-
+  bivalve_cleaned |>
+  filter(fml == "NO_FAMILY_SPECIFIED") |>
+  select(tna, fml, rnk)
+print(errant_families, n = Inf)
+errant_families |> pull(tna) |> unique()
+```
 
 # Mapping data #
 
@@ -323,7 +403,7 @@ palaeogeo_file_layers <-
   c("Shallow marine" = "sm", "Landmass" = "lm", "Mountain" = "m", "Ice cap" = "i")
 
 read_geojson <-
-  function(prefix, filename = "./data/palaeogeographical_reconstructions/id_402_2_reconstructed_68.00Ma.geojson") {
+  function(prefix, filename = "./data/palaeogeographical_reconstructions/id_402_2_reconstructed_68.00Ma.gmt") {
   # Read a list of GeoJSON files and combine into a single sf collection.
   #
   # Arguments:
@@ -364,7 +444,7 @@ base_map <-
     theme(panel.border = element_blank())
 
 modern_coastlines <-
-  st_read("./data/palaeogeographical_reconstructions/Global_EarthByte_GPlates_PresentDay_Coastlines_Polyline_reconstructed_68.00Ma.geojson")
+  st_read("./data/palaeogeographical_reconstructions/Global_EarthByte_GPlates_PresentDay_Coastlines_Polyline_reconstructed_68.00Ma.gmt")
 
 base_map +
   geom_sf(data = modern_coastlines, colour = "grey60") +
@@ -444,6 +524,53 @@ base_map +
   geom_sf(data = palaeo_coords) +
   coord_sf(crs = "+proj=robin")
 ```
+
+# Palaeoenvironmental data
+
+```{r}
+palaeoenvironment <-
+  st
+```
+
+# Finding extinctions
+
+We find taxa that go extinct by charting those present before the K/Pg boundary that aren't present afterwards. Initially, do this for each species: we group into families later.
+
+```{r species_extinctions}
+species_extinctions <-
+  bivalve_cleaned %>%
+    filter(
+      rnk == 3,
+      lag >= 66 & lag <= 70
+    ) |>
+    group_by(tna) |>
+    summarize(kpg_ext = 1)
+```
+
+In the context of families, we can see the proportions of the families that go extinct.
+
+```{r family_extinction_proporation, fig.cap = "Proportions of bivalve families that go extinction across the Cretaceous/palaeogene boundary."}
+fml_extinction_proportion <-
+  bivalve_cleaned |>
+  filter(
+    rnk == 3,
+    lag >= 61.2 & lag <= 72 & eag >= 66
+  ) |>
+  left_join(species_extinctions, by = "tna") |>
+  select(tna, fml, kpg_ext) |>
+  distinct(.keep_all = TRUE) |>
+  mutate(kpg_ext = replace(kpg_ext, is.na(kpg_ext), 0)) |>
+  group_by(fml, kpg_ext) |>
+  summarize(n = n()) |>
+  mutate(ext_prop = n / sum(n)) |>
+  filter(kpg_ext == 1)
+
+fml_extinction_proportion |>
+  ggplot(aes(x = fml, y = ext_prop)) +
+  geom_col() +
+  coord_flip()
+```
+
 
 
 # References
