@@ -34,6 +34,7 @@ library(jsonlite)
 library(rnaturalearth)
 library(rnaturalearthdata)
 library(sf)
+library(stringdist)
 library(tidyverse)
 library(viridis)
 ```
@@ -133,7 +134,6 @@ family_occurrences %>%
 Now we can do a more thorough look through the data to check that it's correct, or at least in the form we expect it to be. Fortunately there is a handy package, *CoordinateCleaner*, that can help with this. It checks for coordinates that are present in the middle of countries or at (0, 0) — implying they have imprecise, or generic location data — or those occurrences that are spatiotemporal outliers — indicating they may not be correct identifications. Q guide through these checks is [here](https://docs.ropensci.org/CoordinateCleaner/articles/Cleaning_PBDB_fossils_with_CoordinateCleaner.html).
 
 ### Spatial checks ###
-
 
 This first step checks that the coordinates are included as numbers and that there aren't any potential errors — such as matching latitude and longitude values. It's recommended to also check which record, if any, are flagged by adding `value = "flagged"` to all commands.
 
@@ -268,7 +268,12 @@ Now for checking outliers in time and space — those that are much separate
 
 occ_outliers_taxon <-
   occ_checking %>%
-  cf_outl(taxon = "tna", lat = "lat", lon = "lng", min_age = "lag", max_age = "eag", value = "flagged")
+  cf_outl(
+    taxon = "tna",
+    lat = "lat", lon = "lng",
+    min_age = "lag", max_age = "eag",
+    value = "flagged"
+  )
 ```
 
 ## Excluding questionable data
@@ -281,28 +286,47 @@ names(cs_ma) <- c("UK", "AA")
 bivalve_pbdb_data <-
   bivalve_pbdb_data %>%
   mutate(
-    cc_iso3 = countrycode(cc2, origin = "iso2c", destination = "iso3c", custom_match = cs_ma)
+    cc_iso3 = countrycode(cc2,
+      origin = "iso2c", destination = "iso3c", custom_match = cs_ma
+    )
   )
 
 bivalve_cleaned <-
   bivalve_pbdb_data %>%
-  clean_fossils(taxon = "tna", min_age = "lag", max_age = "eag", lon = "lng", lat = "lat", countries = "cc_iso3", value = "clean") %>%
+  clean_fossils(
+    taxon = "tna",
+    min_age = "lag", max_age = "eag",
+    lon = "lng", lat = "lat",
+    countries = "cc_iso3", value = "clean"
+  ) %>%
   filter(str_detect(jev, "marine|shelf|oceanic"))
 ```
 
 ## Checking taxonomy
 
-A final set of things to check is for names that might have misspellings or missing taxonomy data.
+A final set of things to check is for names that might have misspellings or missing taxonomy data. 
 
-```{r}
-library(stringdist)
+### Remove subspecies names ###
 
+
+One of the features of many names is including a subspecies name in parentheses. While taxonomically important, this can be problematic as some taxa will include the subspecies, while others may not depending on the taxonomy. We thus remove the subspecies name. At this point, it's also useful to convert the strings to lowercase to remove any errors from capitalization.
+
+```{r remove_subspecies}
+bivalve_cleaned <-
+  bivalve_cleaned |>
+  mutate(tna_trimmed = str_replace_all(str_to_lower(tna), "\\(([:lower:]+)\\)\\s*", ""))
+```
+
+### Check spelling differences ###
+
+Next, we check for spelling differences. Here, we use the *distance* between strings, in essence the number of characters different, to check whether there are misspelled names. Package *stringdist* has the function `stringdistmatrix` that calculates the pairwise distances within a string vector, thus showing the most similarly-spelled taxon names. Using an arbitrary distance cutoff — in this case 4 — will show the most similar strings.
+
+```{r spelling_errors}
 str_dist_matrix <-
   bivalve_cleaned |>
   filter(rnk == 3) |>
-  pull(tna) |>
+  pull(tna_trimmed) |>
   unique() |>
-  tolower() |>
   stringdistmatrix(useNames = "strings", method = "lcs") |>
   as.matrix()
 
@@ -316,13 +340,30 @@ str_indices <-
     row         = rownames(str_dist_matrix)[row_n_fixed],
     col         = colnames(str_dist_matrix)[col_n_fixed],
     distance    = str_dist_matrix[pos_n]
-  )
-str_indices
+  ) |>
+  arrange(distance)
+write_csv(str_indices, "./output/similar_spellings.csv")
 ```
+
+At this point, we check the names against accepted names in [WoRMS](https://www.marinespecies.org/aphia.php?p=search), [LifeWatch](https://www.lifewatch.be/data-services/), [GBIF](https://www.gbif.org), or *Treatise on Invertebrate Paleontology*. Then, we use a conversion list to correct these in the data. Note this output table shows differences both ways (row and column), so each minor difference is shown twice with the names switched.
+
+```{r correct_taxon_spellings}
+name_corrections <-
+  list(
+    'syncyclonema haggi' = 'syncyclonema haeggi'
+  )
+
+# bivalve_cleaned |>
+#   mutate(tna_trimmed = map(name_corrections, str_replace_all, tna_trimmed, names(name_corrections))) |>
+#   # filter(tna_trimmed == 'syncyclonema haggi') |>
+#   pull(tna_trimmed)
+```
+
+### Check family name validity ###
 
 We can check what families are in included in the data quite easily but *pulling* this column out and finding unique records. 
 
-```{r}
+```{r family_records}
 bivalve_cleaned |>
   pull(fml) |>
   unique()
@@ -330,11 +371,11 @@ bivalve_cleaned |>
 
 We see that there are two errant values: "NO_FAMILY_SPECIFIED" and `NA`.
 
-```{r}
+```{r show_uncertain_families}
 errant_taxonomy <-
   bivalve_cleaned |>
   filter(fml == "NO_FAMILY_SPECIFIED" | is.na(fml)) |>
-  select(tna, fml, rnk)
+  select(tna_trimmed, fml, rnk)
 print(errant_taxonomy, n = Inf)
 errant_taxonomy |>
   group_by(rnk) |>
@@ -343,15 +384,35 @@ errant_taxonomy |>
 errant_taxonomy |> pull(tna) |> unique()
 ```
 
-This finds `r nrow(errant_taxonomy)` records that wither have no family or `NA`. Most are identified to family level, but a similar number are species. It turns out that those with `NA` in the family are only identified to a higher taxonomic level, so we can leave them alone. 
+This finds `r nrow(errant_taxonomy)` records that wither have no family or `NA`. Most are identified to genus level, but a similar number are species. It turns out that those with `NA` in the family are only identified to a higher taxonomic level, so we can leave them alone. 
 
-```{r}
+The code below instead shows the lower taxa without a family specified. This are ripe for inclusion.
+
+```{r taxa_no_family}
 errant_families <-
   bivalve_cleaned |>
   filter(fml == "NO_FAMILY_SPECIFIED") |>
   select(tna, fml, rnk)
 print(errant_families, n = Inf)
-errant_families |> pull(tna) |> unique()
+```
+
+We can write this out to a file that can then be uploaded to LifeWatch and use that to compare against its databases.
+
+```{r write_family_lifewatch, eval = FALSE}
+errant_families |>
+  select(tna) |>
+  unique() %>%
+  transmute(ScientificName = tna) %>%
+  write_csv("./output/uncertain_taxa.csv")
+```
+
+This list of uncertain taxa can then be compared against an online data base, such as [LifeWatch](https://www.lifewatch.be/data-services/).
+
+```{r}
+lifewatch_taxon_check <-
+  read_csv("./output/19470_uncertain_taxa.csv")
+
+print(lifewatch_taxon_check)
 ```
 
 # Mapping data #
