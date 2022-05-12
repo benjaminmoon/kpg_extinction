@@ -43,7 +43,7 @@ library(viridis)
 
 I'm rather opinionated about code and formatting. I think it's generally better to be strict about the packages you use and how you write the code. I tend to use *tidyverse* style and formatting, which has [a guide](https://r4ds.had.co.nz/index.html) written by Hadley Wickham, who's created some of the most used R packages. Google have a [style guide](https://google.github.io/styleguide/Rguide.html) for writing R code that I recommend following, but as a guide can and should be changed to meet your needs.
 
-I use *piping* a lot. This means passing the result of one function as the first argument of the next line. R has a native version shown as `|>`, but this is rather new (version 4.1.0). *tidyverse* and package *magrittr* has had a different version for while that looks like `%>%` and is probably the better to use, so you might see that online more often.
+I use *piping* a lot. This means passing the result of one function as the first argument of the next line. R has a native version shown as `%>%`, but this is rather new (version 4.1.0). *tidyverse* and package *magrittr* has had a different version for while that looks like `%>%` and is probably the better to use, so you might see that online more often.
 
 This guide is written in [R Markdown](https://rmarkdown.rstudio.com/articles_intro.html), a text format that combines text and code and can be run easily in R Studio and other environments. I also tend to use *ggplot* for plotting, so have a look [here](https://ggplot2-book.org) for the low-down on that package.
 
@@ -313,7 +313,7 @@ One of the features of many names is including a subspecies name in parentheses.
 
 ```{r remove_subspecies}
 bivalve_cleaned <-
-  bivalve_cleaned |>
+  bivalve_cleaned %>%
   mutate(tna_trimmed = str_replace_all(str_to_lower(tna), "\\(([:lower:]+)\\)\\s*", ""))
 ```
 
@@ -323,11 +323,11 @@ Next, we check for spelling differences. Here, we use the *distance* between str
 
 ```{r spelling_errors}
 str_dist_matrix <-
-  bivalve_cleaned |>
-  filter(rnk == 3) |>
-  pull(tna_trimmed) |>
-  unique() |>
-  stringdistmatrix(useNames = "strings", method = "lcs") |>
+  bivalve_cleaned %>%
+  filter(rnk == 3) %>%
+  pull(tna_trimmed) %>%
+  unique() %>%
+  stringdistmatrix(useNames = "strings", method = "lcs") %>%
   as.matrix()
 
 str_indices <-
@@ -340,23 +340,22 @@ str_indices <-
     row         = rownames(str_dist_matrix)[row_n_fixed],
     col         = colnames(str_dist_matrix)[col_n_fixed],
     distance    = str_dist_matrix[pos_n]
-  ) |>
+  ) %>%
   arrange(distance)
 write_csv(str_indices, "./output/similar_spellings.csv")
 ```
 
-At this point, we check the names against accepted names in [WoRMS](https://www.marinespecies.org/aphia.php?p=search), [LifeWatch](https://www.lifewatch.be/data-services/), [GBIF](https://www.gbif.org), or *Treatise on Invertebrate Paleontology*. Then, we use a conversion list to correct these in the data. Note this output table shows differences both ways (row and column), so each minor difference is shown twice with the names switched.
+At this point, we check the names against accepted names in [WoRMS](https://www.marinespecies.org/aphia.php?p=search), [LifeWatch](https://www.lifewatch.be/data-services/), [GBIF](https://www.gbif.org), or *Treatise on Invertebrate Paleontology*. Then, we use a conversion vector to correct these in the data: the incorrect version is before the equals and the corrected version after. Note this output table shows differences both ways (row and column), so each minor difference is shown twice with the names switched.
 
 ```{r correct_taxon_spellings}
 name_corrections <-
-  list(
+  c(
     'syncyclonema haggi' = 'syncyclonema haeggi'
   )
 
-# bivalve_cleaned |>
-#   mutate(tna_trimmed = map(name_corrections, str_replace_all, tna_trimmed, names(name_corrections))) |>
-#   # filter(tna_trimmed == 'syncyclonema haggi') |>
-#   pull(tna_trimmed)
+bivalve_cleaned <-
+  bivalve_cleaned %>%
+  mutate(tna_trimmed = str_replace_all(tna_trimmed, name_corrections))
 ```
 
 ### Check family name validity ###
@@ -364,8 +363,8 @@ name_corrections <-
 We can check what families are in included in the data quite easily but *pulling* this column out and finding unique records. 
 
 ```{r family_records}
-bivalve_cleaned |>
-  pull(fml) |>
+bivalve_cleaned %>%
+  pull(fml) %>%
   unique()
 ```
 
@@ -373,15 +372,15 @@ We see that there are two errant values: "NO_FAMILY_SPECIFIED" and `NA`.
 
 ```{r show_uncertain_families}
 errant_taxonomy <-
-  bivalve_cleaned |>
-  filter(fml == "NO_FAMILY_SPECIFIED" | is.na(fml)) |>
+  bivalve_cleaned %>%
+  filter(fml == "NO_FAMILY_SPECIFIED" | is.na(fml)) %>%
   select(tna_trimmed, fml, rnk)
 print(errant_taxonomy, n = Inf)
-errant_taxonomy |>
-  group_by(rnk) |>
+errant_taxonomy %>%
+  group_by(rnk) %>%
   summarize(n = n())
 
-errant_taxonomy |> pull(tna) |> unique()
+errant_taxonomy %>% pull(tna) %>% unique()
 ```
 
 This finds `r nrow(errant_taxonomy)` records that wither have no family or `NA`. Most are identified to genus level, but a similar number are species. It turns out that those with `NA` in the family are only identified to a higher taxonomic level, so we can leave them alone. 
@@ -390,8 +389,8 @@ The code below instead shows the lower taxa without a family specified. This are
 
 ```{r taxa_no_family}
 errant_families <-
-  bivalve_cleaned |>
-  filter(fml == "NO_FAMILY_SPECIFIED") |>
+  bivalve_cleaned %>%
+  filter(fml == "NO_FAMILY_SPECIFIED") %>%
   select(tna, fml, rnk)
 print(errant_families, n = Inf)
 ```
@@ -399,8 +398,8 @@ print(errant_families, n = Inf)
 We can write this out to a file that can then be uploaded to LifeWatch and use that to compare against its databases.
 
 ```{r write_family_lifewatch, eval = FALSE}
-errant_families |>
-  select(tna) |>
+errant_families %>%
+  select(tna) %>%
   unique() %>%
   transmute(ScientificName = tna) %>%
   write_csv("./output/uncertain_taxa.csv")
@@ -603,8 +602,8 @@ species_extinctions <-
     filter(
       rnk == 3,
       lag >= 66 & lag <= 70
-    ) |>
-    group_by(tna) |>
+    ) %>%
+    group_by(tna) %>%
     summarize(kpg_ext = 1)
 ```
 
@@ -612,21 +611,21 @@ In the context of families, we can see the proportions of the families that go e
 
 ```{r family_extinction_proporation, fig.cap = "Proportions of bivalve families that go extinction across the Cretaceous/palaeogene boundary."}
 fml_extinction_proportion <-
-  bivalve_cleaned |>
+  bivalve_cleaned %>%
   filter(
     rnk == 3,
     lag >= 61.2 & lag <= 72 & eag >= 66
-  ) |>
-  left_join(species_extinctions, by = "tna") |>
-  select(tna, fml, kpg_ext) |>
-  distinct(.keep_all = TRUE) |>
-  mutate(kpg_ext = replace(kpg_ext, is.na(kpg_ext), 0)) |>
-  group_by(fml, kpg_ext) |>
-  summarize(n = n()) |>
-  mutate(ext_prop = n / sum(n)) |>
+  ) %>%
+  left_join(species_extinctions, by = "tna") %>%
+  select(tna, fml, kpg_ext) %>%
+  distinct(.keep_all = TRUE) %>%
+  mutate(kpg_ext = replace(kpg_ext, is.na(kpg_ext), 0)) %>%
+  group_by(fml, kpg_ext) %>%
+  summarize(n = n()) %>%
+  mutate(ext_prop = n / sum(n)) %>%
   filter(kpg_ext == 1)
 
-fml_extinction_proportion |>
+fml_extinction_proportion %>%
   ggplot(aes(x = fml, y = ext_prop)) +
   geom_col() +
   coord_flip()
