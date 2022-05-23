@@ -28,8 +28,10 @@ The following packages are used:
 - *viridis*: colour blind-friendly plotting [@Garnier2021].
 
 ```{r packages}
+library(brms)
 library(CoordinateCleaner)
 library(countrycode)
+library(GeoRange)
 library(jsonlite)
 library(rnaturalearth)
 library(rnaturalearthdata)
@@ -37,6 +39,9 @@ library(sf)
 library(stringdist)
 library(tidyverse)
 library(viridis)
+
+options(mc.cores = parallel::detectCores())
+rstan::rstan_options(auto_write = TRUE)
 ```
 
 ## Useful background and sites ##
@@ -129,7 +134,8 @@ family_occurrences %>%
   slice_max(family_occurrences, n = 10)
 ```
 
-## Data quality ##
+
+# Data quality #
 
 Now we can do a more thorough look through the data to check that it's correct, or at least in the form we expect it to be. Fortunately there is a handy package, *CoordinateCleaner*, that can help with this. It checks for coordinates that are present in the middle of countries or at (0, 0) — implying they have imprecise, or generic location data — or those occurrences that are spatiotemporal outliers — indicating they may not be correct identifications. Q guide through these checks is [here](https://docs.ropensci.org/CoordinateCleaner/articles/Cleaning_PBDB_fossils_with_CoordinateCleaner.html).
 
@@ -281,8 +287,10 @@ occ_outliers_taxon <-
 The above functions let you go through and check the removed occurrences for the reasons and to make sure they should be removed. This code below does all the cleaning automatically using the helper function `clean_fossils`.
 
 ```{r occ_full_cleaning, cache = TRUE}
-cs_ma <- c("GBR", "ATA")
-names(cs_ma) <- c("UK", "AA")
+cs_ma <- c(
+  "UK" = "GBR",
+  "AA" = "ATA"
+)
 bivalve_pbdb_data <-
   bivalve_pbdb_data %>%
   mutate(
@@ -302,24 +310,25 @@ bivalve_cleaned <-
   filter(str_detect(jev, "marine|shelf|oceanic"))
 ```
 
+That last line filters only those occurrences from marine/shelf/oceanic environments, based on the lithology. Have a look through the column and see whether you want to include any other environments; separate them with the vertical bar — `|`, meaning 'or' in regular expressions. The `clean_fossils` function outputs useful messages to show what stage it's at; I get some warnings about decimallatitude and decimallongitude, but I don't think that's anything to worry about.
+
 ## Checking taxonomy
 
 A final set of things to check is for names that might have misspellings or missing taxonomy data. 
 
-### Remove subspecies names ###
+### Remove subgenus names ###
 
+One of the features of many names is including a subgenus name in parentheses. While taxonomically important, this can be problematic as some taxa will include the subgenus, while others may not depending on the taxonomy. We thus remove the subgenus name. At this point, it's also useful to convert the strings to lowercase to remove any errors from capitalization. Searching and modifying strings in R uses a system 'regular expressions': a series of indicators to select certain groups of characters. In the example below1, we're looking for a set of lowercase letters1, surrounded by parentheses and followed by a space. Have a look at [this cheat sheet for stringr](https://raw.githubusercontent.com/rstudio/cheatsheets/main/strings.pdf) (there are cheat sheets for some other packages to look at here: <https://www.rstudio.com/resources/cheatsheets/>).
 
-One of the features of many names is including a subspecies name in parentheses. While taxonomically important, this can be problematic as some taxa will include the subspecies, while others may not depending on the taxonomy. We thus remove the subspecies name. At this point, it's also useful to convert the strings to lowercase to remove any errors from capitalization.
-
-```{r remove_subspecies}
+```{r remove_subgenus}
 bivalve_cleaned <-
   bivalve_cleaned %>%
-  mutate(tna_trimmed = str_replace_all(str_to_lower(tna), "\\(([:lower:]+)\\)\\s*", ""))
+  mutate(tna_trimmed = str_remove_all(str_to_lower(tna), "\\(([:lower:]+)\\)\\s*"))
 ```
 
 ### Check spelling differences ###
 
-Next, we check for spelling differences. Here, we use the *distance* between strings, in essence the number of characters different, to check whether there are misspelled names. Package *stringdist* has the function `stringdistmatrix` that calculates the pairwise distances within a string vector, thus showing the most similarly-spelled taxon names. Using an arbitrary distance cutoff — in this case 4 — will show the most similar strings.
+Next, we check for spelling differences. Here, we use the *distance* between strings, in essence the number of characters different, to check whether there are misspelled names. Package *stringdist* has the function `stringdistmatrix` that calculates the pairwise distances within a string vector, thus showing the most similarly-spelled taxon names. Using an arbitrary distance cutoff — in this case 4, but `string_cutoff` can be changed — will show the most similar strings.
 
 ```{r spelling_errors}
 str_dist_matrix <-
@@ -330,9 +339,11 @@ str_dist_matrix <-
   stringdistmatrix(useNames = "strings", method = "lcs") %>%
   as.matrix()
 
+string_cutoff <- 4
+
 str_indices <-
   tibble(
-    pos_n       = which(str_dist_matrix <= 4 & str_dist_matrix > 0),
+    pos_n       = which(str_dist_matrix <= string_cutoff & str_dist_matrix > 0),
     row_n       = pos_n %/% dim(str_dist_matrix)[2],
     row_n_fixed = replace(row_n, row_n == 0, dim(str_dist_matrix)[2]) + 1, # need to add 1 to offset mod(1583) = 0
     col_n       = pos_n %%  dim(str_dist_matrix)[1],
@@ -350,13 +361,16 @@ At this point, we check the names against accepted names in [WoRMS](https://www.
 ```{r correct_taxon_spellings}
 name_corrections <-
   c(
-    'syncyclonema haggi' = 'syncyclonema haeggi'
+    "syncyclonema haggi" = "syncyclonema haeggi",
+    "incorrect" = "correct"
   )
 
 bivalve_cleaned <-
   bivalve_cleaned %>%
   mutate(tna_trimmed = str_replace_all(tna_trimmed, name_corrections))
 ```
+
+We now use `tna_trimmed` as the main taxon name-column.
 
 ### Check family name validity ###
 
@@ -380,18 +394,18 @@ errant_taxonomy %>%
   group_by(rnk) %>%
   summarize(n = n())
 
-errant_taxonomy %>% pull(tna) %>% unique()
+errant_taxonomy %>% pull(tna_trimmed) %>% unique()
 ```
 
 This finds `r nrow(errant_taxonomy)` records that wither have no family or `NA`. Most are identified to genus level, but a similar number are species. It turns out that those with `NA` in the family are only identified to a higher taxonomic level, so we can leave them alone. 
 
-The code below instead shows the lower taxa without a family specified. This are ripe for inclusion.
+The code below instead shows the lower taxa without a family specified. These are ripe for inclusion.
 
 ```{r taxa_no_family}
 errant_families <-
   bivalve_cleaned %>%
   filter(fml == "NO_FAMILY_SPECIFIED") %>%
-  select(tna, fml, rnk)
+  select(tna_trimmed, fml, rnk)
 print(errant_families, n = Inf)
 ```
 
@@ -399,9 +413,9 @@ We can write this out to a file that can then be uploaded to LifeWatch and use t
 
 ```{r write_family_lifewatch, eval = FALSE}
 errant_families %>%
-  select(tna) %>%
+  select(tna_trimmed) %>%
   unique() %>%
-  transmute(ScientificName = tna) %>%
+  transmute(ScientificName = tna_trimmed) %>%
   write_csv("./output/uncertain_taxa.csv")
 ```
 
@@ -413,6 +427,7 @@ lifewatch_taxon_check <-
 
 print(lifewatch_taxon_check)
 ```
+
 
 # Mapping data #
 
@@ -516,10 +531,13 @@ base_map +
 We have the modern localities for our bivalve occurrences, but need to *rotate* these to their position at the end of the Cretaceous (68 Ma) to get their palaeocoordinates. The GPlates Web Service can do this online or through docker, but doesn't offer the rotation model used for the combined MYC palaeogeographical reconstruction, and can be quite slow to do many requests — and we have tens-of-thousands of bivalve occurrences. Instead, we field this out to [pyGPlates](https://www.gplates.org/docs/pygplates/index.html). This step of reconstruction has been done, so the file `./data/reconstructed_68Ma.gmt` can be read in directly.
 
 ```{r write_bivalve_coords, eval = FALSE}
-modern_coords <-
+kpg_occurrences <-
   bivalve_cleaned %>%
-  filter(lag > 66 & lag < 75) %>%
-  select(c("lng", "lat")) %>%
+  filter(lag >= 66 & lag < 70)
+
+modern_coords <-
+  kpg_occurrences %>%
+  # select(c("lng", "lat")) %>%
   st_as_sf(coords = c("lng", "lat"), crs = 4326)
 
 st_write(modern_coords, "./data/kpg_bivalve_modern_coordinates.gmt", driver = "OGR_GMT")
@@ -585,16 +603,19 @@ base_map +
   coord_sf(crs = "+proj=robin")
 ```
 
+
 # Palaeoenvironmental data
 
 ```{r}
+#TODO: import netCDF data
 palaeoenvironment <-
   st
 ```
 
+
 # Finding extinctions
 
-We find taxa that go extinct by charting those present before the K/Pg boundary that aren't present afterwards. Initially, do this for each species: we group into families later.
+We find taxa that go extinct by charting those present before the K/Pg boundary that aren't present afterwards. Initially, do this for each species: we group into families later. Filtering out the species that go extinct, we choose those that have their last appearances after 70 Ma but before 66 Ma; you can be more precise and do after 68 Ma, but I don't know whether the PBDB is dated precise enough to make much difference here.
 
 ```{r species_extinctions}
 species_extinctions <-
@@ -603,11 +624,11 @@ species_extinctions <-
       rnk == 3,
       lag >= 66 & lag <= 70
     ) %>%
-    group_by(tna) %>%
+    group_by(tna_trimmed) %>%
     summarize(kpg_ext = 1)
 ```
 
-In the context of families, we can see the proportions of the families that go extinct.
+In the context of families, we can see the proportions of the families that go extinct. We choose species from the Maastrichtian and Dining, join on the previous table identifying those species that go extinct, then group into families and count the proportion that go extinction at the K/Pg boundary.
 
 ```{r family_extinction_proporation, fig.cap = "Proportions of bivalve families that go extinction across the Cretaceous/palaeogene boundary."}
 fml_extinction_proportion <-
@@ -616,14 +637,14 @@ fml_extinction_proportion <-
     rnk == 3,
     lag >= 61.2 & lag <= 72 & eag >= 66
   ) %>%
-  left_join(species_extinctions, by = "tna") %>%
-  select(tna, fml, kpg_ext) %>%
+  left_join(species_extinctions, by = "tna_trimmed") %>%
+  select(tna_trimmed, fml, kpg_ext) %>%
   distinct(.keep_all = TRUE) %>%
   mutate(kpg_ext = replace(kpg_ext, is.na(kpg_ext), 0)) %>%
   group_by(fml, kpg_ext) %>%
   summarize(n = n()) %>%
   mutate(ext_prop = n / sum(n)) %>%
-  filter(kpg_ext == 1)
+  filter(kpg_ext == 1) # select the extinction proportion
 
 fml_extinction_proportion %>%
   ggplot(aes(x = fml, y = ext_prop)) +
@@ -631,6 +652,151 @@ fml_extinction_proportion %>%
   coord_flip()
 ```
 
+This last plot may also benefit from showing the number of species for each family (to gauge the relative magnitude) and another version showing the absolute numbers.
+
+
+# Starting modelling
+
+These last chunks essentially bring together most of the things we need to start modelling. These first few bits below will start with showing the general workflow for modelling extinctions across the Cretaceous–Palaeogene boundary and can then be readily extended to ask other or more specific questions. There are two levels to look at when modelling the extinction of these Bivalve taxa: (1) the family level, and (2) the species level.
+
+Family extinctions
+: Using the proportion of the family that goes extinct as the variable to predict.
+
+Species extinctions
+: Predicting the extinction of species as an absolute: whether it does or does not go extinct.
+
+You'll be familiar with linear modelling, typified by the equation \(y = mx + c\). In our case, \(y\) is extinction — the value we're trying to predict — while \(x\) is the predictor that we think has an effect, or drives extinction — temperature, area, salinity etc. In other language, extinction is the dependent variable while temperature, area, salinity are the independent variables. Additional complexity comes in because standard linear modelling assumes that the dependent variable is normally-distributed. What \(y = mx + c\) is shorthand for is this:
+
+\[
+  y ~ \textrm{Normal} \left( \mu, \sigma \right) \\
+  \mu = mx + c,
+\]
+
+where \(\mu\) is the mean and \(\sigma\) is a constant standard deviation. You're predictors, \(x\) are use to work out the mean of a normal distribution, \(\mu\), which has a fixed standard deviation, \(\sigma\). Going through the normal distribution is where the 'randomness' inherent in the data comes from and accounts for the spread of the data about the best-fit line. Using this normal distribution model is fine for heights or lengths or other things like that, but we have two different examples:
+
+1. Family extinctions is a proportion, so must between 0–1. You could force a very narrow normal distribution with a small standard deviation, but the maths extends to infinity no matter how unlikely the probably may be.
+2. Species extinctions will be a yes/no on whether that species goes extinct (included as 1 or 0). The normal distribution is continuous, so cannot easily be applied to discrete values like this.
+
+This is where the extension of *generalized linear modelling* comes in: this relaxes the requirement to use a normal distribution for the dependent variable, so now we can predict proportions or discrete values. 
+
+## Family extinctions ##
+
+Family extinctions we've calculated as the proportion of the family that goes extinction (between 0–1). Therefore, to model this we need to use a distribution that extends between 0–1, but not beyond that. This is prime territory for the [*beta distribution*](https://en.wikipedia.org/wiki/Beta_distribution), so our model instead looks like this:
+
+\[
+  E_i ~ \textrm{Beta} \left( \bar{p}_i, \theta \right) \\
+  \textrm{logit} \left( \bar{p}_i \right) = m_x x_i + c \\
+  m_x ~ \textrm{Normal} \left( 0, 10 \right) \\
+  c ~ \textrm{Normal} \left( 0, 10 \right) \\
+  \theta = \phi + 2 \\
+  \phi ~ \textrm{Normal} \left( 0, 10 \right),
+\]
+
+where \(E\) is the proportion of the family that goes extinct, \(\bar{p}\) is the Beta distribution mean and \(\theta\) its shape parameter, \(x\) is the predictor, \(m\) and \(c\) are the coefficient and intercept of the linear model. For the Beta distribution, \(\theta\) determines the shape: whether the probabilities are condensed (e.g. 0.4–0.6) into the middle or focused around the edges (e.g. 0 or 1) with \(\theta = 2\) giving a flat distribution. Here we add the extra variable \(\phi\) so that \(\theta\) is centred around 2. The logit expression is needed to convert the ingoing model into a value between 0–1 as is required for \(\bar{p}\).
+
+The additional feature here is that this is a more *Bayesian* realization of generalized linear modelling: the parameters in the model (\(\bar{p}, m_x, c, and \phi\)) all have probability distributions associated with them. In essence, rather that heading towards definite values, this model and these distributions incorporate uncertainty in measurements and models so that we end up with *probabilities* for a variety of different results, with the 'best' linear model having the highest probability. The model can't tell you the exact level of extinction that a certain driver might generate (like with a very simplified linear model might suggest), but will give you the probability of different amounts of extinction, with one level hopefully being the most probable.
+
+Most of the modelling can be done in R, but often is 'slow': adding complicated probability distributions is difficult, especially as you add more data and more complex models. This is added to R repeatedly having to keep checking between the data, working out what calculations it needs to do to get to the model values, then tell the computer to do those things. Instead we'll use the package *brms* that uses an external language called *Stan*. Stan is designed specifically for generalized linear modelling and is also compiled: this means that it starts by taking the model and making a little program that can then skip past all the copying and checking R does and goes straight the computer and calculates. Fast.
+
+The other feature of Stan, and one that's often used when Bayesian inference is involved, is rather than sampling and calculating the probabilities directly, which is difficult, is instead to push some values through and calculate a result, then shift the parameters and calculate it again. By doing this repeatedly, you can then build up a picture of what the final distribution looks like without having to calculate it in full, complicated detail. This is called *Monte Carlo* sampling (MC) and often has some extra details called *Metropolis Coupled Monte Carlo* (MCMC).
+
+brms is an R package that creates the Stan code from the data and model and tells Stan to run an MCMC analysis then parses the results ready to be plotted. It installs all the bits needed, so we don't need to leave R to do these analyses.
+
+### Spread of occurrences ###
+
+This first model will use the family proportions of extinction and will model this related to the amount of geographical space that the family encompasses. This space will be calculated using a *minimum spanning tree* (MST). An MST plots the shortest branching path between all the points included in a set of data: the more spread out the points, the longer the MST length. `MSTDist` in the chunk below calculates the MST for each family at the K/Pg boundary1, and the results are joined to the proportions calculated earlier.
+
+```{r minimum_spanning_tree}
+family_mst_data <-
+  palaeo_coords %>%
+  add_column(
+    plng = st_coordinates(palaeo_coords)[, 1],
+    plat = st_coordinates(palaeo_coords)[, 2]
+  ) %>%
+  st_drop_geometry() %>%
+  group_by(fml) %>%
+  summarize(
+    n_occs = n(),
+    mst = MSTDist(plng, plat)$MST_km
+  ) %>%
+  select(fml, n_occs, mst) %>%
+  left_join(fml_extinction_proportion, by = "fml")
+
+family_mst_data %>%
+  ggplot(aes(x = fml, y = mst)) +
+  geom_col() +
+  coord_flip()
+
+family_mst_data %>%
+  ggplot(aes(x = mst, y = ext_prop)) +
+  geom_point()
+```
+
+This last plot is a good one to check as it's the linear model we want to test: extinction against MST length. There's hints of a positive relationship but the data are certainly well spread.
+
+A few rows have `NA` for their extinction values; these are the families that don't appear until after the K/Pg boundary. We'll remove these in a moment, but we're nearly ready to go in into modelling. The last bit will be to standardize the MST values: change all the values so that they have a mean 0 and standard deviation of 1. This reduces the effects of scale when doing the modelling; we will convert back afterwards when we need to.
+
+```{r standardize_mst}
+mst_scaling <-
+  scale(family_mst_data$mst)
+
+family_mst_scaled <-
+  family_mst_data %>%
+  mutate(mst_stand = mst_scaling[, 1]) %>%
+  filter(!is.na(ext_prop)) %>%
+  select(fml, mst_stand, ext_prop)
+```
+
+Now we generate the linear model. This takes the form above, but I'll replace a few of the parameter symbols to match that we're using MST:
+
+\[
+  E_i ~ \textrm{ZOIBeta} \left( \bar{p}_i, \phi \right) \\
+  \textrm{logit} \left( \par{p}_i \right) = \alpha + \beta_M M_i \\
+  \beta_M ~ \textrm{Normal} \left(0, 10 \right) \\
+  \alpha ~ \textrm{Normal} \left( 0, 10 \right) \\
+  \phi ~ \textrm{Gamma} \left( 0.01, 0.01 \right),
+\]
+
+where \(E_i\) is the proportion of the family that goes extinct, \(M_i\) is the scaled minimum spanning tree for the whole family, \(\alpha\) is the intercept, and \(\beta_M\) is the coefficient for \(M_i\) in the linear model. Here we use a *Zero-One-Inflated Beta distribution* (ZOIBeta) as the data has many proportions of 1.0 for our extinctions; these are likely a combination of total extinction and small numbers of species.
+
+We now implement this in *brms*. This borrows the formula notation used in base R linear models, but adds in the extras needed for generalized linear modelling. The first thing that's useful to do is to show what parameters need to be defined initially with `get_priors`.
+
+```{r brms_mst_priors}
+get_prior(
+  ext_prop ~ 0 + mst_stand,
+  data = family_mst_scaled,
+  family = zero_one_inflated_beta()
+)
+```
+
+Here we see how the model is defined with `ext_prop ~ mst_stand`, i.e. the extinction proportion is related to the standardized MST length. Then we specify the data and the *family* or distribution to be used in the model, in this case the Beta distribution. This also includes the logit function needed. You can see all the distributions and several useful examples for *brms* in the vignettes and its [website](https://paul-buerkner.github.io/brms/index.html). A list of the available families is [here](https://paul-buerkner.github.io/brms/reference/brmsfamily.html) or in R help (`?brmsfamily`).
+
+*brms* is clever in setting out all the bits of the model we need and providing sensible defaults. We can change these *prior distributions* (i.e. those we start the model with) in the main function using `prior` as you can see below. Running the model itself uses the same form in the function `brm`: call the formula, data, and family, then set any priors. Below we also setup `brm` to sample from the prior, so we can see the before and after, and then some housekeeping on how many jumps we want the MCMC analysis to do. More jumps samples better but takes more time, and the algorithm is clever so that it learns as it goes; thus after a while adding more iterations (`iter`) doesn't change the results and are wasted. Getting there quicker is helped by having more *chains*, which are essentially repeats of the analysis that can be combined, and using more *cores* on your computer so that you do several of these repeated analyses at the same time.
+
+Run this code block and then we'll see what the output looks like.
+
+```{r brms_mst_formula}
+model_family_mst <-
+  brm(
+    ext_prop ~ mst_stand,
+    data = family_mst_scaled,
+    family = zero_one_inflated_beta(),
+    prior = prior(normal(0, 10), coef = "mst_stand", class = "b") +
+      prior(normal(0, 10), class = "Intercept"),
+    sample_prior = TRUE,
+    iter = 4000, chains = 4, cores = 4,
+    save_pars = save_pars()
+  )
+```
+
+Once the `brm` function is run, the Stan program is compiled and then the analysis proceeds. If you're running the same analysis again then it shouldn't require recompiling and goes straight to the analysis.
+
+```{r brms_mst_summary}
+summary(model_family_mst)
+plot(model_family_mst)
+pp_check(model_family_mst, ndraws = 100)
+```
 
 
 # References
+
