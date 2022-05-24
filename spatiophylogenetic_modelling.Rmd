@@ -28,6 +28,8 @@ The following packages are used:
 - *viridis*: colour blind-friendly plotting [@Garnier2021].
 
 ```{r packages}
+library(ncdf4)
+library(tidyverse)
 library(brms)
 library(CoordinateCleaner)
 library(countrycode)
@@ -37,8 +39,9 @@ library(rnaturalearth)
 library(rnaturalearthdata)
 library(sf)
 library(stringdist)
-library(tidyverse)
 library(viridis)
+library(ncdump) # needs to go after tidyverse I think
+library(lattice)
 
 options(mc.cores = parallel::detectCores())
 rstan::rstan_options(auto_write = TRUE)
@@ -606,11 +609,60 @@ base_map +
 
 # Palaeoenvironmental data
 
-```{r}
-#TODO: import netCDF data
-palaeoenvironment <-
-  st
+We've got palaeoenvironmental data from an analysis done by @Ridgwell2010NG. The data is stored in a *netCDF* file: this is a compact way to store data on geographical scales where you have values at various locations. It's different to the mapping data above: this netCDF is *raster* with data in points, whereas the maps above were *vector* and had lines of data. @Ridgwell2010NG did a reconstruction of the palaeoenvironment at the K/Pg boundary using Biogem from the GeNie package, one of a series of Earth-systems models. There are two steps to getting data from a netCDF file into R: (1) loading the metadata, then (2) pulling the data you want into R. I get some warning about deprecated *tidyverse* functions, but I don't think this is anything to worry about (yet). [This page](https://pjbartlein.github.io/REarthSysSci/netCDF.html#reading-a-netcdf-data-set-using-the-ncdf4-package) has a good guide to getting started with netCDF.
+
+
+```{r load_netcdf_meta}
+metadata <-
+  ncdump::NetCDF("./data/EXAMPLE.p0055c.RidgwellSchmidt2010.SPIN1/biogem/fields_biogem_3d.nc")
+
+# look at the variables
+print(metadata$variable, n = Inf)
+
+# load the desired variables
+kpg_env <-
+  nc_open("./data/EXAMPLE.p0055c.RidgwellSchmidt2010.SPIN1/biogem/fields_biogem_3d.nc")
 ```
+
+Loading the data gives us lots of lovely information. The important thing to note is that all the environment variables have values in fours components: longitude, latitude, depth, and time. The last of these is because GeNie runs for a set number of simulated years to reach a steady state. In this case it's for 10,000 years, so we'll want to use the values from year 10,000.
+
+```{r grab_temperature}
+lon <-
+  ncvar_get(kpg_env, "lon")
+lat <-
+  ncvar_get(kpg_env, "lat")
+temp <-
+  ncvar_get(kpg_env, "ocn_temp")
+dim(temp)
+```
+
+The dimensions of the temperature values are 36, 36, 16, and 13. It's a four-dimensional array with 36 values each for longitude and latitude, 16 depth values, and 13 time values. The ordering means that rows are longitude, columns are latitude, and depth and time are printed as sequential matrices. We can plot this quickly.
+
+```{r plot_temp}
+image(lon, lat, temp[,,1,13], asp = 1)
+```
+
+But his isn't too useful and needs some cleaning up.
+
+```{r clean_temp}
+miss_val <- ncatt_get(kpg_env, "ocn_temp", "missing_value")
+temp[temp == miss_val$value] <- NA
+surface_temp <- temp[,,1,13]
+
+grid = expand.grid(lon = lon, lat = lat)
+grid$ocn_temp <- c(surface_temp)
+
+temp_plot <-
+  st_as_stars(grid, dims = c("lon", "lat"), values = "ocn_temp", crs = 4326)
+
+ggplot() +
+  geom_stars(data = temp_plot) + #,  aes(x = lon, y = lat, fill = ocn_temp)) +
+  geom_sf(data = modern_coastlines, colour = "grey60") +
+  scale_fill_viridis(option = "inferno") +
+  theme_void()
+```
+
+You can see that the coastlines and temperatures don't quite match up. The projections must be different. We can either reproject the coastlines onto the 2010 data or find some more recent temperature data using this outlines.
 
 
 # Finding extinctions

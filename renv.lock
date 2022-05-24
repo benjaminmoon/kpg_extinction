@@ -1259,6 +1259,25 @@
       "Hash": "7a7541cc284cb2ba3ba7eae645892af5",
       "Requirements": []
     },
+    "ncdf4": {
+      "Package": "ncdf4",
+      "Version": "1.19",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "7c902f18c0be04c8767b94019ffe8063",
+      "Requirements": []
+    },
+    "ncdump": {
+      "Package": "ncdump",
+      "Version": "0.0.3",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "64184d242465020843240a2e50f411d9",
+      "Requirements": [
+        "dplyr",
+        "ncdf4"
+      ]
+    },
     "nleqslv": {
       "Package": "nleqslv",
       "Version": "3.3.2",
