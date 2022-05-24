@@ -720,7 +720,7 @@ Species extinctions
 You'll be familiar with linear modelling, typified by the equation \(y = mx + c\). In our case, \(y\) is extinction — the value we're trying to predict — while \(x\) is the predictor that we think has an effect, or drives extinction — temperature, area, salinity etc. In other language, extinction is the dependent variable while temperature, area, salinity are the independent variables. Additional complexity comes in because standard linear modelling assumes that the dependent variable is normally-distributed. What \(y = mx + c\) is shorthand for is this:
 
 \[
-  y ~ \textrm{Normal} \left( \mu, \sigma \right) \\
+  y \sim \textrm{Normal} \left( \mu, \sigma \right) \\
   \mu = mx + c,
 \]
 
@@ -736,12 +736,12 @@ This is where the extension of *generalized linear modelling* comes in: this rel
 Family extinctions we've calculated as the proportion of the family that goes extinction (between 0–1). Therefore, to model this we need to use a distribution that extends between 0–1, but not beyond that. This is prime territory for the [*beta distribution*](https://en.wikipedia.org/wiki/Beta_distribution), so our model instead looks like this:
 
 \[
-  E_i ~ \textrm{Beta} \left( \bar{p}_i, \theta \right) \\
+  E_i \sim \textrm{Beta} \left( \bar{p}_i, \theta \right) \\
   \textrm{logit} \left( \bar{p}_i \right) = m_x x_i + c \\
-  m_x ~ \textrm{Normal} \left( 0, 10 \right) \\
-  c ~ \textrm{Normal} \left( 0, 10 \right) \\
+  m_x \sim \textrm{Normal} \left( 0, 10 \right) \\
+  c \sim \textrm{Normal} \left( 0, 10 \right) \\
   \theta = \phi + 2 \\
-  \phi ~ \textrm{Normal} \left( 0, 10 \right),
+  \phi \sim \textrm{Normal} \left( 0, 10 \right),
 \]
 
 where \(E\) is the proportion of the family that goes extinct, \(\bar{p}\) is the Beta distribution mean and \(\theta\) its shape parameter, \(x\) is the predictor, \(m\) and \(c\) are the coefficient and intercept of the linear model. For the Beta distribution, \(\theta\) determines the shape: whether the probabilities are condensed (e.g. 0.4–0.6) into the middle or focused around the edges (e.g. 0 or 1) with \(\theta = 2\) giving a flat distribution. Here we add the extra variable \(\phi\) so that \(\theta\) is centred around 2. The logit expression is needed to convert the ingoing model into a value between 0–1 as is required for \(\bar{p}\).
@@ -802,11 +802,11 @@ family_mst_scaled <-
 Now we generate the linear model. This takes the form above, but I'll replace a few of the parameter symbols to match that we're using MST:
 
 \[
-  E_i ~ \textrm{ZOIBeta} \left( \bar{p}_i, \phi \right) \\
-  \textrm{logit} \left( \par{p}_i \right) = \alpha + \beta_M M_i \\
-  \beta_M ~ \textrm{Normal} \left(0, 10 \right) \\
-  \alpha ~ \textrm{Normal} \left( 0, 10 \right) \\
-  \phi ~ \textrm{Gamma} \left( 0.01, 0.01 \right),
+  E_i \sim \textrm{ZOIBeta} \left( \bar{p}_i, \phi \right) \\
+  \textrm{logit} \left( \bar{p}_i \right) = \alpha + \beta_M M_i \\
+  \beta_M \sim \textrm{Normal} \left(0, 10 \right) \\
+  \alpha \sim \textrm{Normal} \left( 0, 10 \right) \\
+  \phi \sim \textrm{Gamma} \left( 0.01, 0.01 \right),
 \]
 
 where \(E_i\) is the proportion of the family that goes extinct, \(M_i\) is the scaled minimum spanning tree for the whole family, \(\alpha\) is the intercept, and \(\beta_M\) is the coefficient for \(M_i\) in the linear model. Here we use a *Zero-One-Inflated Beta distribution* (ZOIBeta) as the data has many proportions of 1.0 for our extinctions; these are likely a combination of total extinction and small numbers of species.
