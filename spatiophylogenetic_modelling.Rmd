@@ -31,13 +31,16 @@ The following packages are used:
 library(ncdf4)
 library(tidyverse)
 library(brms)
+library(bayesplot)
 library(CoordinateCleaner)
 library(countrycode)
 library(GeoRange)
 library(jsonlite)
+library(rgeos)
 library(rnaturalearth)
 library(rnaturalearthdata)
 library(sf)
+library(stars)
 library(stringdist)
 library(viridis)
 library(ncdump) # needs to go after tidyverse I think
@@ -534,21 +537,23 @@ base_map +
 We have the modern localities for our bivalve occurrences, but need to *rotate* these to their position at the end of the Cretaceous (68 Ma) to get their palaeocoordinates. The GPlates Web Service can do this online or through docker, but doesn't offer the rotation model used for the combined MYC palaeogeographical reconstruction, and can be quite slow to do many requests — and we have tens-of-thousands of bivalve occurrences. Instead, we field this out to [pyGPlates](https://www.gplates.org/docs/pygplates/index.html). This step of reconstruction has been done, so the file `./data/reconstructed_68Ma.gmt` can be read in directly.
 
 ```{r write_bivalve_coords, eval = FALSE}
-kpg_occurrences <-
+ek_occurrences <-
   bivalve_cleaned %>%
   filter(lag >= 66 & lag < 70)
 
 modern_coords <-
-  kpg_occurrences %>%
-  # select(c("lng", "lat")) %>%
+  ek_occurrences %>%
+  select(c("oid", "tna", "rnk", "eag", "lag", "fml", "lng", "lat", "tna_trimmed")) %>%
   st_as_sf(coords = c("lng", "lat"), crs = 4326)
 
 st_write(modern_coords, "./data/kpg_bivalve_modern_coordinates.gmt", driver = "OGR_GMT")
 ```
 
-Instructions to install pyGPlates can be found [here](https://www.gplates.org/docs/pygplates/index.html), including the necessary Python packages (specifically `proj`). [Anaconda](https://www.anaconda.com)/[Miniconda](https://docs.conda.io/en/latest/miniconda.html) is a good Python managing system in which you can also create project environments. The code in the python blocks below can be run in a python environment — separate to the main R environment — or can be run directly within R using the *reticulate* package [@Ushey2022].
+We have to reduce the number of columns above as `OGR_GMT` seems only to save the first 68.
 
-There are two steps to reconstructing the palaeocoordinates: (1) assigning the localities to the static polygons (i.e. plate fragments thay move with continental drift), and (2) rotating the plate fragments and localities to the palaeolocations. First we assign the points and output a GPML file that can be visualized in GPlates directly.
+Instructions to install *pyGPlates* can be found [here](https://www.gplates.org/docs/pygplates/index.html), including the necessary Python packages (specifically `proj`). [Anaconda](https://www.anaconda.com)/[Miniconda](https://docs.conda.io/en/latest/miniconda.html) is a good Python managing system in which you can also create project environments. The code in the python blocks below can be run in a python environment — separate to the main R environment — or can be run directly within R using the *reticulate* package [@Ushey2022].
+
+There are two steps to reconstructing the palaeocoordinates: (1) assigning the localities to the static polygons (i.e. plate fragments that move with continental drift), and (2) rotating the plate fragments and localities to the palaeolocations. First we assign the points and output a GPML file that can be visualized in GPlates directly.
 
 ```{python assign_locality_polygons, eval = FALSE}
 import pygplates
@@ -600,6 +605,13 @@ These converted locations can be read back into R and plotted over the base map.
 ```{r read_palaeo_coords, fig.cap = "Palaeolocations of marine bivalve occurrences in the latest Cretaceous (70–66 Ma) plotted on a palaeogeographical map at 68 Ma.", fig.width = 9, fig.height = 4}
 palaeo_coords <-
   st_read("./data/reconstructed_68Ma.gmt")
+
+palaeo_coords <-
+  palaeo_coords %>%
+  add_column(
+    plng = st_coordinates(palaeo_coords)[, 1],
+    plat = st_coordinates(palaeo_coords)[, 2]
+  )
 
 base_map +
   geom_sf(data = palaeo_coords) +
@@ -664,6 +676,33 @@ ggplot() +
 
 You can see that the coastlines and temperatures don't quite match up. The projections must be different. We can either reproject the coastlines onto the 2010 data or find some more recent temperature data using this outlines.
 
+## Pulling out values ##
+
+The last step here is to pull out the environmental values for each of the occurrences.
+
+```{r find_nearest_occ_environment}
+occ_coord <-
+  palaeo_coords %>%
+  as_data_frame() %>%
+  select(c("plng", "plat")) %>%
+  SpatialPoints()
+temp_coord <- SpatialPoints(grid[complete.cases(grid),])
+
+# from https://stackoverflow.com/a/27444208
+nearest_points <-
+  apply(gDistance(temp_coord, occ_coord, byid = TRUE), 1, which.min)
+```
+
+The code above identifies the row number in the expanded temperature data that corresponds to the location for each occurrence. We can then extract and add that as a new column to `palaeo_coords`.
+
+```{r join_palaeotemps}
+occ_temp <-
+  grid[complete.cases(grid),]$ocn_temp[nearest_points]
+
+palaeo_coords <-
+  palaeo_coords %>%
+  add_column(pocn_temp = occ_temp)
+```
 
 # Finding extinctions
 
@@ -752,19 +791,15 @@ Most of the modelling can be done in R, but often is 'slow': adding complicated 
 
 The other feature of Stan, and one that's often used when Bayesian inference is involved, is rather than sampling and calculating the probabilities directly, which is difficult, is instead to push some values through and calculate a result, then shift the parameters and calculate it again. By doing this repeatedly, you can then build up a picture of what the final distribution looks like without having to calculate it in full, complicated detail. This is called *Monte Carlo* sampling (MC) and often has some extra details called *Metropolis Coupled Monte Carlo* (MCMC).
 
-brms is an R package that creates the Stan code from the data and model and tells Stan to run an MCMC analysis then parses the results ready to be plotted. It installs all the bits needed, so we don't need to leave R to do these analyses.
+*brms* is an R package that creates the Stan code from the data and model and tells Stan to run an MCMC analysis then parses the results ready to be plotted. It installs all the bits needed, so we don't need to leave R to do these analyses.
 
 ### Spread of occurrences ###
 
-This first model will use the family proportions of extinction and will model this related to the amount of geographical space that the family encompasses. This space will be calculated using a *minimum spanning tree* (MST). An MST plots the shortest branching path between all the points included in a set of data: the more spread out the points, the longer the MST length. `MSTDist` in the chunk below calculates the MST for each family at the K/Pg boundary1, and the results are joined to the proportions calculated earlier.
+This first model will use the family proportions of extinction and will model this related to the amount of geographical space that the family encompasses. This space will be calculated using a *minimum spanning tree* (MST). An MST plots the shortest branching path between all the points included in a set of data: the more spread out the points, the longer the MST length. `MSTDist` in the chunk below calculates the MST for each family at the K/Pg boundary, and the results are joined to the proportions calculated earlier.
 
 ```{r minimum_spanning_tree}
 family_mst_data <-
   palaeo_coords %>%
-  add_column(
-    plng = st_coordinates(palaeo_coords)[, 1],
-    plat = st_coordinates(palaeo_coords)[, 2]
-  ) %>%
   st_drop_geometry() %>%
   group_by(fml) %>%
   summarize(
@@ -847,8 +882,129 @@ Once the `brm` function is run, the Stan program is compiled and then the analys
 summary(model_family_mst)
 plot(model_family_mst)
 pp_check(model_family_mst, ndraws = 100)
+conditional_effects(model_family_mst)
 ```
 
+The last line, `conditional_effects` plots the relationship between the input and output, i.e. the 'line of best fit' between minimum spanning tree and family extinction proportion. This will probably the most interesting and useful. You can use the argument `plot = FALSE` to save the values separately.
+
+## Species extinctions ##
+
+Species extinctions are instead measured as a no/yes, coded as 0/1, so we instead use the [binomial distribution](https://en.wikipedia.org/wiki/Binomial_distribution) generalized linear model. The binomial distribution shows the probability of success or failure for a given number of attempts (think coin tosses and getting heads or tails). In our case, the number of attempts is 1: a species can only go extinct once! (This makes it a special case of the binomial distribution called the Bernoulli distribution.) The parameter \(p\) then becomes the probability that the species will go extinct; this is what we're trying to predict.
+
+\[
+  E \sim \textrm{Bernoulli} \left( p_i \right) \\
+  \textrm{logit} \left( p_i \right) = \alpha + \beta_T T_i \\
+  \alpha \sim \textrm{Normal} \left( 0, 10 \right) \\
+  \beta_T \sim \textrm{Normal} \left( 0, 10 \right),
+\]
+
+where \(E\) is whether a species goes extinct or not, \(p\) is the probability of extinction, \(T\) is the average temperature for that species, and \(\alpha\) and \(\beta\) are the coefficients.
+
+In fact, we can go a step further and use all the occurrences rather than grouping by species and using the temperature at each occurrence as the input. This requires a *multilevel* or *hierarchical* model. Rather than grouping the family data (and summarizing with a mean value or similar), we instead input the individual occurrences and model each one and the trend across whole species. The model is the same except for the second line:
+
+\[
+  \textrm{logit} \left( p_i \right) 1= \alpha + \beta_{T[species]} T_i,
+\]
+
+where \(\beta_{T[species]}\) now indicates the coefficient on a per-species basis. We create our data.
+
+```{r species_temp_extinctions}
+species_temp_scaled <-
+  palaeo_coords %>%
+  st_drop_geometry() %>%
+  filter(rnk == 3) %>%
+  left_join(species_extinctions, by = "tna_trimmed") %>%
+  mutate(
+    tna_trimmed = as_factor(tna_trimmed),
+    pocn_temp_scaled = scale(pocn_temp)[, 1]
+  ) %>%
+  select(tna_trimmed, pocn_temp_scaled, kpg_ext, fml, plng, plat)
+```
+
+Implementing this in *brms* is similarly not too difficult to do either:
+
+```{r sp_temp_prior}
+get_prior(
+  kpg_ext ~ 1 + (pocn_temp_scaled | tna_trimmed),
+  data = species_temp_scaled,
+  family = binomial()
+)
+```
+
+The syntax `(pocn_temp_scaled | tna_trimmed)` estimates the temperature coefficient for each species grouping. This creates a correlation matrix with the model (`lkj(1)` in the priors). We then run the model itself. This will be slower than the family-level analysis because it is estimating much more from more data.
+
+```{r brms_species_temp}
+model_species_temp <-
+  brm(
+    # kpg_ext ~ 1 + (pocn_temp_scaled | tna_trimmed),
+    kpg_ext ~ 1 + (pocn_temp_scaled | tna_trimmed + fml),
+    data = species_temp_scaled,
+    family = bernoulli(),
+    sample_prior = TRUE,
+    iter = 4000, chains = 4, cores = 4,
+    save_pars = save_pars()
+  )
+```
+
+And we can summarize with these.
+
+```{r brms_temp_summary}
+summary(model_species_temp)
+plot(model_species_temp)
+pp_check(model_species_temp, ndraws = 100)
+```
+
+It may not appear different to the family run above, but noticed under the summary that there are 200 levels in the group-level effects: these are the coefficients for each species.
+
+It may also be worth grouping by family too with `kpg_ext ~ 1 + (pocn_temp_scaled | tna_trimmed | fml)` or `kpg_ext ~ 1 + (pocn_temp_scaled | tna_trimmed + fml)`. Have a look at this [this document](https://journal.r-project.org/archive/2018/RJ-2018-017/index.html) and `?brmsformula` for a description of the formula syntax that *brms* uses.
+
+
+## More advanced plotting ##
+
+The summary plots above give some good starting formation, but more detailed plotting is needed to fully understand the output. This is where the *bayesplot* package comes in: it holds many useful functions for easily plotting the output of *brms* and other *Stan* outputs. Have a look at [this link](https://mc-stan.org/bayesplot/articles/plotting-mcmc-draws.html) for more examples.
+
+### Posterior intervals ###
+
+Posterior intervals are probably the most useful outputs. These show the range of the output coefficients and their mean values. In other words, these are the outputs we'd want to see to tell whether there is a strong relationship between out predictor and response. The relative size can also tell whether certain species might be more strongly affected. In each case1, we first pull out the results, or *draws* from the model object, then use a function from *bayesplot* to plot the results.
+
+```{r  plot_species_temp_interval}
+posterior <- as_draws_array(model_species_temp)
+
+mcmc_intervals(posterior, pars = vars(!matches("prior|lp__|b_|sd_|cor_")))
+ggsave(file = "./fig/model-species-family-intervals.pdf", height = 80, limitsize = FALSE)
+```
+
+The parameters are estimated for all 200 or so species, hence the not very useful plot. Also, because some of the values are large, the coefficients are compressed. The desired parameters can be specified  with the `pars` argument; `parnames` gives a list of the parameters to choose from.
+
+```{r plot_specific_intervals}
+#parnames(model_species_temp)
+mcmc_areas(
+  posterior,
+  pars = vars(contains("arca"), starts_with("b_Intercept"))
+)
+```
+
+## Adding in correlation ##
+
+Some amount of correlation will come because the occurrences are all next to each other and the temperatures vary across that. We can add an extra term `gp` to the formula to describe this *autocorrelation* based on the palaeocoordinates. This describes a *Gaussian process* (and a multivariate one at that), which builds in the autocorrelation between the occurrence positions. The implementation below is inspired by [this one](https://bookdown.org/content/4857/adventures-in-covariance.html#continuous-categories-and-the-gaussian-process).
+
+In this case the Gaussian process we want works on the distances between each occurrence: closer occurrences have more similar values with the model (often on the standard deviation). Thus, we give the Gaussian process the palaeocoordinates; *brms* then generates the correlation structure that Stan uses in the model and MCMC.
+
+Warning, this will be slow! (Multiple hours to complete.) I suggest playing with the models above then thinking about using this one later. When using multiple chains, the time taken for each chain can also be very different as the starting points are randomized.
+
+```{r species_autocorr, eval = FALSE, cache = TRUE}
+model_species_temp_autocorr <-
+  brm(
+    kpg_ext ~ 1 + (pocn_temp_scaled | tna_trimmed + fml) + gp(plng, plat, scale = FALSE),
+    data = species_temp_scaled,
+    family = bernoulli(),
+    sample_prior = TRUE,
+    iter = 100, chains = 1, cores = 1,
+    save_pars = save_pars()
+  )
+```
+
+Another source of covariation is phylogeny, which I haven't done yet but can include later.
 
 # References
 

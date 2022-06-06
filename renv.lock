@@ -1159,6 +1159,18 @@
         "generics"
       ]
     },
+    "lwgeom": {
+      "Package": "lwgeom",
+      "Version": "0.2-8",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "68b7afe010f5ddc3d5a5c8113018bb39",
+      "Requirements": [
+        "Rcpp",
+        "sf",
+        "units"
+      ]
+    },
     "magrittr": {
       "Package": "magrittr",
       "Version": "2.0.2",
@@ -1910,6 +1922,21 @@
       "Hash": "ce8613f4e8c84ef4da9eba65b874ebe9",
       "Requirements": [
         "lattice"
+      ]
+    },
+    "stars": {
+      "Package": "stars",
+      "Version": "0.5-5",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "b116254371e0d6681ab063bae82f0ece",
+      "Requirements": [
+        "abind",
+        "classInt",
+        "lwgeom",
+        "rlang",
+        "sf",
+        "units"
       ]
     },
     "stringdist": {
