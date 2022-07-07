@@ -45,6 +45,7 @@ library(stringdist)
 library(viridis)
 library(ncdump) # needs to go after tidyverse I think
 library(lattice)
+library(reticulate)
 
 options(mc.cores = parallel::detectCores())
 rstan::rstan_options(auto_write = TRUE)
@@ -135,7 +136,8 @@ family_occurrences %>%
   ggplot(
     aes(x = reorder(fml, desc(family_occurrences)), y = family_occurrences)
   ) +
-    geom_col()
+    geom_col() +
+    coord_flip()
 family_occurrences %>%
   slice_max(family_occurrences, n = 10)
 ```
@@ -286,6 +288,24 @@ occ_outliers_taxon <-
     min_age = "lag", max_age = "eag",
     value = "flagged"
   )
+
+#swap lat and long over for the flagged occurrences
+occ_ids <- c("occ:102732", "occ:102733", "occ:102734", "occ:102735", "occ:102736","occ:102737","occ:102738","occ:102739","occ:102740", "occ:102741", "occ:102742", "occ:102773", "occ:102774", "occ:102775", "occ:102776", "occ:102777", "occ:102778", "occ:102780", "occ:102781", "occ:102782", "occ:102783", "occ:102784", "occ:102785", "occ:102786","occ:102787", "occ:102788", "occ:102789", "occ:102790","occ:102791", "occ:102792","occ:102793", "occ:102794", "occ:143771", "occ:143772", "occ:143773", "occ:143774", "occ:143775", "occ:143776", "occ:143777", "occ:143778", "occ:143779", "occ:143780", "occ:143781", "occ:143782", "occ:143785", "occ:143786", "occ:143787", "occ:143788", "occ:143789", "occ:143792", "occ:143793", "occ:143794", "occ:143795", "occ:143796", "occ:143799", "occ:143800", "occ:143801", "occ:143802", "occ:143803", "occ:143806", "occ:143807", "occ:143808", "occ:143809", "occ:143810", "occ:143813", "occ:143814", "occ:143815", "occ:143816", "occ:143817", "occ:143820", "occ:143821", "occ:143822", "occ:143823", "occ:143824", "occ:143827", "occ:143828", "occ:143829", "occ:143830", "occ:143831", "occ:143834", "occ:143835", "occ:143836", "occ:143837", "occ:143838", "occ:143840", "occ:143841", "occ:143842", "occ:143844", "occ:143845", "occ:143846", "occ:143848", "occ:143849", "occ:143850", "occ:143852", "occ:143853", "occ:143854", "occ:143856", "occ:143857", "occ:143859", "occ:143860", "occ:143862", "occ:143864", "occ:143865", "occ:143866", "occ:143867", "occ:143868", "occ:144716", "occ:144717", "occ:564462", "occ:564493", "occ:564494", "occ:564495", "occ:564593", "occ:564594", "occ:564595", "occ:678968", "occ:678969", "occ:678970", "occ:678971", "occ:678972", "occ:678973", "occ:678974", "occ:678975", "occ:678976", "occ:678977", "occ:678978", "occ:678979", "occ:678980", "occ:678981", "occ:678982", "occ:678983", "occ:678984", "occ:678985", "occ:678986", "occ:678987", "occ:678988", "occ:678989", "occ:678990", "occ:678991", "occ:678992", "occ:678993", "occ:678994", "occ:678995", "occ:678996", "occ:678997", "occ:678998", "occ:678999", "occ:679000", "occ:679001", "occ:679002", "occ:679003", "occ:679004", "occ:679005", "occ:679006", "occ:679007", "occ:679008", "occ:691679", "occ:691680", "occ:691681", "occ:691682", "occ:691683", "occ:691684", "occ:691685", "occ:691691", "occ:692061", "occ:692062", "occ:692063", "occ:692064", "occ:692065", "occ:692066", "occ:692067", "occ:692068", "occ:692069", "occ:692070", "occ:692071", "occ:692072", "occ:692073", "occ:692074", "occ:692075", "occ:692076", "occ:692077", "occ:692078", "occ:692079","occ:692080", "occ:692081", "occ:692082", "occ:692083", "occ:692084", "occ:692085", "occ:692086", "occ:692087", "occ:692088", "occ:692089", "occ:692090", "occ:692091", "occ:1018904", "occ:1018905", "occ:1228468", "occ:1468425", "occ:1468428")
+#create string of flagged occurrences  paste0(occ_ids, collapse = "|")
+occ_string <- paste0(occ_ids, collapse = "|")
+
+oid_matches <- which(bivalve_pbdb_data$oid %in% occ_ids)
+
+lat <- bivalve_pbdb_data$lat
+lng <- bivalve_pbdb_data$lng
+
+lat[oid_matches] <- bivalve_pbdb_data$lng[oid_matches]
+lng[oid_matches] <- bivalve_pbdb_data$lat[oid_matches]
+
+data.frame(old_lat = bivalve_pbdb_data$lat, new_lat = lat, old_lng = bivalve_pbdb_data$lng, new_lng = lng) %>% slice(oid_matches)
+
+bivalve_pbdb_data$lat <- lat
+bivalve_pbdb_data$lng <- lng
 ```
 
 ## Excluding questionable data
@@ -311,9 +331,10 @@ bivalve_cleaned <-
     taxon = "tna",
     min_age = "lag", max_age = "eag",
     lon = "lng", lat = "lat",
-    countries = "cc_iso3", value = "clean"
+    countries = "cc_iso3", value = "clean",
+    tests = c("agesequal", "centroids", "equal", "gbif", "institutions", "spatiotemp", "validity", "zeros")
   ) %>%
-  filter(str_detect(jev, "marine|shelf|oceanic"))
+    filter(str_detect(env, "deep-water|basinal|shoreface|reef|offshore|peritidal|subtidal|marine|lagoonal|submarine|coastal|delta|deltaic|foreshore|perireef|prodelta|estuary/bay|crevasse splay|interdistributary"))
 ```
 
 That last line filters only those occurrences from marine/shelf/oceanic environments, based on the lithology. Have a look through the column and see whether you want to include any other environments; separate them with the vertical bar — `|`, meaning 'or' in regular expressions. The `clean_fossils` function outputs useful messages to show what stage it's at; I get some warnings about decimallatitude and decimallongitude, but I don't think that's anything to worry about.
@@ -324,7 +345,7 @@ A final set of things to check is for names that might have misspellings or miss
 
 ### Remove subgenus names ###
 
-One of the features of many names is including a subgenus name in parentheses. While taxonomically important, this can be problematic as some taxa will include the subgenus, while others may not depending on the taxonomy. We thus remove the subgenus name. At this point, it's also useful to convert the strings to lowercase to remove any errors from capitalization. Searching and modifying strings in R uses a system 'regular expressions': a series of indicators to select certain groups of characters. In the example below1, we're looking for a set of lowercase letters1, surrounded by parentheses and followed by a space. Have a look at [this cheat sheet for stringr](https://raw.githubusercontent.com/rstudio/cheatsheets/main/strings.pdf) (there are cheat sheets for some other packages to look at here: <https://www.rstudio.com/resources/cheatsheets/>).
+One of the features of many names is including a subgenus name in parentheses. While taxonomically important, this can be problematic as some taxa will include the subgenus, while others may not depending on the taxonomy. We thus remove the subgenus name. At this point, it's also useful to convert the strings to lowercase to remove any errors from capitalization. Searching and modifying strings in R uses a system 'regular expressions': a series of indicators to select certain groups of characters. In the example below, we're looking for a set of lowercase letters, surrounded by parentheses and followed by a space. Have a look at [this cheat sheet for stringr](https://raw.githubusercontent.com/rstudio/cheatsheets/main/strings.pdf) (there are cheat sheets for some other packages to look at here: <https://www.rstudio.com/resources/cheatsheets/>).
 
 ```{r remove_subgenus}
 bivalve_cleaned <-
@@ -368,7 +389,7 @@ At this point, we check the names against accepted names in [WoRMS](https://www.
 name_corrections <-
   c(
     "syncyclonema haggi" = "syncyclonema haeggi",
-    "incorrect" = "correct"
+    "calorhadia equalis"= "calorhadia aequalis", "pycnodonta vesicularis"="pycnodonte vesicularis", "leda coelata" = "Saccella taphria", "arca silverdalensis" = "cunearca silverdalensis"
   )
 
 bivalve_cleaned <-
@@ -403,14 +424,14 @@ errant_taxonomy %>%
 errant_taxonomy %>% pull(tna_trimmed) %>% unique()
 ```
 
-This finds `r nrow(errant_taxonomy)` records that wither have no family or `NA`. Most are identified to genus level, but a similar number are species. It turns out that those with `NA` in the family are only identified to a higher taxonomic level, so we can leave them alone. 
+This finds `r nrow(errant_taxonomy)` records that either have no family or `NA`. Most are identified to genus level, but a similar number are species. It turns out that those with `NA` in the family are only identified to a higher taxonomic level, so we can leave them alone. 
 
 The code below instead shows the lower taxa without a family specified. These are ripe for inclusion.
 
 ```{r taxa_no_family}
 errant_families <-
   bivalve_cleaned %>%
-  filter(fml == "NO_FAMILY_SPECIFIED") %>%
+  filter(fml == "NO_FAMILY_SPECIFIED" & rnk == 3) %>%
   select(tna_trimmed, fml, rnk)
 print(errant_families, n = Inf)
 ```
@@ -432,6 +453,93 @@ lifewatch_taxon_check <-
   read_csv("./output/19470_uncertain_taxa.csv")
 
 print(lifewatch_taxon_check)
+```
+
+#allocating families to errant taxa
+
+```{r}
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "entolium")] <- "Entoliidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "balabania")] <- "Radiolitidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "dechaseauxia")] <- "Radiolitidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "hardaghia")] <- "Radiolitidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "megaceras")] <- "Epidiceratidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "rhedensia")] <- "Hippuritidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "praecaprina")] <- "Caprinidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "tetravaccinites")] <- "Hippuritidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "pseudopironaea")] <- "Hippuritidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "hatayia")] <- "Radiolitidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "branislava")] <- "Radiolitidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "miseia")] <- "Radiolitidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "aeora")] <- "Veneridae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "agnomyax")] <- "Tellinidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "aviculoperna")] <- "Pteriidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "birkelundita")] <- "Carditidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "branislavia")] <- "Radiolitidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "cardilona")] <- "Verticordiidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "caspiconcha")] <- "Kalenteridae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "chattonia")] <- "Crassatellidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "cyrenopsis")] <- "Neomiodontidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "divarikellia")] <- "Galeommatidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "dozyia")] <- "Astartidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "egerella")] <- "Donacidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "eomeretrix")] <- "Veneridae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "eselaevitrigonia")] <- "Trigoniidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "ferganoconcha")] <- "Ferganoconchidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "fulcrella")] <- "Basterotiidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "goossensia")] <- "Carditidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "heligmina")] <- "Eligmidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "hemicyclonosta")] <- "Cardiliidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "hippagus")] <- "Mytilidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "hypoxytoma")] <- "Oxytomidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "isocrassina")] <- "Astartidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "joannisiella")] <- "Ungulinidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "korobkovitrigonia")] <- "Vaugoniidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "laubriereia")] <- "Lasaeidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "macrosolen")] <- "Psammobiidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "mancosinodia")] <- "Veneridae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "mediterraneotrigonia")] <- "Vaugoniidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "megadiceras")] <- "Epidiceratidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "miocardiopsis")] <- "Glossidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "mixtipecten")] <- "Pectinidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "neiloides")] <- "Malletidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "panomya")] <- "Hiatellidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "paramusculus")] <- "Mytelidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "phaxas")] <- "Pharidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "pholadopsis")] <- "Pholadidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "physoida")] <- "Basterotiidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "platymya")] <- "Laternulidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "potamomya")] <- "Corbulidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "protelliptio")] <- "Unionidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "pterolucina")] <- "Lucinidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "quoiecchia")] <- "Myophorellidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "scrobiculabra")] <- "Semelidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "seendia")] <- "Crassatellidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "semolina")] <- "Semelidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "sergipia")] <- "Inoceramidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "skwarkoella")] <- "Trigoniidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "tellinocyclas")] <- "Cyrenidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "tivellina")] <- "Veneridae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "turnus")] <- "Teredinidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "virgotrigonia")] <- "Megatrigoniidae"
+bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "zorrita")] <- "Lasaeidae"
+
+print(bivalve_cleaned)
+```
+
+And now finally remove taxa with NA or no family specified.
+
+```{r remove_family_na}
+bivalve_cleaned <-
+  bivalve_cleaned %>%
+  filter(!str_detect(fml, "NO_FAMILY_SPECIFIED"), !is.na(fml))
+```
+
+And finally check it's all good.
+
+```{r family_records}
+bivalve_cleaned %>%
+  pull(fml) %>%
+  unique()
 ```
 
 
@@ -785,7 +893,7 @@ Family extinctions we've calculated as the proportion of the family that goes ex
 
 where \(E\) is the proportion of the family that goes extinct, \(\bar{p}\) is the Beta distribution mean and \(\theta\) its shape parameter, \(x\) is the predictor, \(m\) and \(c\) are the coefficient and intercept of the linear model. For the Beta distribution, \(\theta\) determines the shape: whether the probabilities are condensed (e.g. 0.4–0.6) into the middle or focused around the edges (e.g. 0 or 1) with \(\theta = 2\) giving a flat distribution. Here we add the extra variable \(\phi\) so that \(\theta\) is centred around 2. The logit expression is needed to convert the ingoing model into a value between 0–1 as is required for \(\bar{p}\).
 
-The additional feature here is that this is a more *Bayesian* realization of generalized linear modelling: the parameters in the model (\(\bar{p}, m_x, c, and \phi\)) all have probability distributions associated with them. In essence, rather that heading towards definite values, this model and these distributions incorporate uncertainty in measurements and models so that we end up with *probabilities* for a variety of different results, with the 'best' linear model having the highest probability. The model can't tell you the exact level of extinction that a certain driver might generate (like with a very simplified linear model might suggest), but will give you the probability of different amounts of extinction, with one level hopefully being the most probable.
+The additional feature here is that this is a more *Bayesian* realization of generalized linear modelling: the parameters in the model (\(\bar{p}, m_x, c, and \phi\)) all have probability distributions associated with them. In essence, rather than heading towards definite values, this model and these distributions incorporate uncertainty in measurements and models so that we end up with *probabilities* for a variety of different results, with the 'best' linear model having the highest probability. The model can't tell you the exact level of extinction that a certain driver might generate (like with a very simplified linear model might suggest), but will give you the probability of different amounts of extinction, with one level hopefully being the most probable.
 
 Most of the modelling can be done in R, but often is 'slow': adding complicated probability distributions is difficult, especially as you add more data and more complex models. This is added to R repeatedly having to keep checking between the data, working out what calculations it needs to do to get to the model values, then tell the computer to do those things. Instead we'll use the package *brms* that uses an external language called *Stan*. Stan is designed specifically for generalized linear modelling and is also compiled: this means that it starts by taking the model and making a little program that can then skip past all the copying and checking R does and goes straight the computer and calculates. Fast.
 
@@ -868,8 +976,8 @@ model_family_mst <-
     ext_prop ~ mst_stand,
     data = family_mst_scaled,
     family = zero_one_inflated_beta(),
-    prior = prior(normal(0, 10), coef = "mst_stand", class = "b") +
-      prior(normal(0, 10), class = "Intercept"),
+    # prior = prior(normal(0, 10), coef = "mst_stand", class = "b") +
+      # prior(normal(0, 10), class = "Intercept"),
     sample_prior = TRUE,
     iter = 4000, chains = 4, cores = 4,
     save_pars = save_pars()
@@ -886,6 +994,14 @@ conditional_effects(model_family_mst)
 ```
 
 The last line, `conditional_effects` plots the relationship between the input and output, i.e. the 'line of best fit' between minimum spanning tree and family extinction proportion. This will probably the most interesting and useful. You can use the argument `plot = FALSE` to save the values separately.
+
+You can make a summary table for the output results with the following.
+
+```{r mst_model_summary}
+mst_summary_table <- posterior_summary(model_family_mst) %>%
+  as_tibble(rownames = "parameter") %>%
+  write_csv("./output/mst_model_summary.csv")
+```
 
 ## Species extinctions ##
 
@@ -954,6 +1070,14 @@ plot(model_species_temp)
 pp_check(model_species_temp, ndraws = 100)
 ```
 
+Here's a more complete summary of the parameters.
+
+```{r mst_model_summary}
+temp_summary_table <- posterior_summary(model_species_temp) %>%
+  as_tibble(rownames = "parameter") %>%
+  write_csv("./output/temp_model_summary.csv")
+```
+
 It may not appear different to the family run above, but noticed under the summary that there are 200 levels in the group-level effects: these are the coefficients for each species.
 
 It may also be worth grouping by family too with `kpg_ext ~ 1 + (pocn_temp_scaled | tna_trimmed | fml)` or `kpg_ext ~ 1 + (pocn_temp_scaled | tna_trimmed + fml)`. Have a look at this [this document](https://journal.r-project.org/archive/2018/RJ-2018-017/index.html) and `?brmsformula` for a description of the formula syntax that *brms* uses.
@@ -980,7 +1104,7 @@ The parameters are estimated for all 200 or so species, hence the not very usefu
 #parnames(model_species_temp)
 mcmc_areas(
   posterior,
-  pars = vars(contains("arca"), starts_with("b_Intercept"))
+  pars = vars(contains("arca"), starts_with("r_fml") & !matches("intercept"))
 )
 ```
 
@@ -995,11 +1119,11 @@ Warning, this will be slow! (Multiple hours to complete.) I suggest playing with
 ```{r species_autocorr, eval = FALSE, cache = TRUE}
 model_species_temp_autocorr <-
   brm(
-    kpg_ext ~ 1 + (pocn_temp_scaled | tna_trimmed + fml) + gp(plng, plat, scale = FALSE),
+    kpg_ext ~ 1 + (pocn_temp_scaled | fml) + gp(plng, plat, scale = FALSE),
     data = species_temp_scaled,
     family = bernoulli(),
     sample_prior = TRUE,
-    iter = 100, chains = 1, cores = 1,
+    iter = 100, chains = 4, cores = 2,
     save_pars = save_pars()
   )
 ```
