@@ -536,7 +536,7 @@ bivalve_cleaned <-
 
 And finally check it's all good.
 
-```{r family_records}
+```{r family_records_again}
 bivalve_cleaned %>%
   pull(fml) %>%
   unique()
@@ -569,12 +569,20 @@ Now, we put these together into the plot using the `geom_sf` function to build u
 The essence of plotting with `geom_sf` is to add the different layers one by one. In this case, the first call plots the country outlines then the second line plots the occurrence points over the top; `scale_colour_viridis` is a good set of plotting colours to use as they are colour blind-friendly; and the final theme options remove the border and the grey background usual in *ggplot* plots.
 
 ```{r plot_occurrence_map, fig.cap = "Map of Bivalvia localities from the Cretaceous and Palaeogene.", fig.width = 7, fig.height = 4}
+# Getting this to work for the Winkel Tripel Projection used help from here: https://wilkelab.org/practicalgg/articles/Winkel_tripel.html
+crs_wintri <- "+proj=wintri +datum=WGS84 +no_defs +over"
+
+grat_wintri <-
+  st_graticule(lat = c(-89.9, seq(-80, 80, 20), 89.9)) |>
+  st_transform_proj(crs = crs_wintri)
+
 ggplot() +
+  geom_sf(data = grat_wintri, colour = "grey30", size = 0.25/.pt) +
   geom_sf(data = world_map, inherit.aes = FALSE) +
   geom_sf(data = occurrences_to_plot, mapping = aes(colour = fml)) +
   scale_colour_viridis(discrete = TRUE) +
-  coord_sf(crs = "+proj=robin") +
-  theme_bw() +
+  coord_sf(crs = crs_wintri, datum = NULL) +
+  ggthemes::theme_map() +
   theme(
     legend.position = "none",
     panel.border = element_blank()
@@ -614,9 +622,12 @@ map_data <-
       id = factor(id, levels = palaeogeo_file_layers, labels = names(palaeogeo_file_layers))
     )
 
+modern_coastlines <-
+  st_read("./data/palaeogeographical_reconstructions/Global_EarthByte_GPlates_PresentDay_Coastlines_Polyline_reconstructed_68.00Ma.gmt")
+
 base_map <-
   ggplot() +
-    geom_sf(data = map_data, aes(fill = id), colour = NA) +
+  geom_sf(data = lwgeom::st_transform_proj(map_data, crs = crs_wintri), aes(fill = id), colour = NA) +
     scale_discrete_manual(
       # colours for base map layers
       values =
@@ -629,15 +640,13 @@ base_map <-
       aesthetics = c("fill"),
       name = "Palaeogeography"
     ) +
-    theme_bw() +
+    geom_sf(data = grat_wintri, colour = "grey30", size = 0.25/.pt) +
+    ggthemes::theme_map() +
     theme(panel.border = element_blank())
-
-modern_coastlines <-
-  st_read("./data/palaeogeographical_reconstructions/Global_EarthByte_GPlates_PresentDay_Coastlines_Polyline_reconstructed_68.00Ma.gmt")
 
 base_map +
   geom_sf(data = modern_coastlines, colour = "grey60") +
-  coord_sf(crs = "+proj=robin")
+    coord_sf(crs = crs_wintri, datum = NULL)
 ```
 
 ## Rotating modern locality coordinates
@@ -646,7 +655,8 @@ We have the modern localities for our bivalve occurrences, but need to *rotate* 
 
 ```{r write_bivalve_coords, eval = FALSE}
 ek_occurrences <-
-  bivalve_cleaned %>%
+  bivalve_cleaned |>
+  filter(rnk == 3) |>
   filter(lag >= 66 & lag < 70)
 
 modern_coords <-
@@ -667,10 +677,12 @@ There are two steps to reconstructing the palaeocoordinates: (1) assigning the l
 import pygplates
 
 # Load one or more rotation files into a rotation model.
-rotation_model = pygplates.RotationModel('./data/palaeogeographical_reconstructions/Muller2019-Young2019-Cao2020_CombinedRotations.rot')
+# rotation_model = pygplates.RotationModel('./data/palaeogeographical_reconstructions/Muller2019-Young2019-Cao2020_CombinedRotations.rot')
+rotation_model = pygplates.RotationModel('./data/Scotese PaleoAtlas_v3/PALEOMAP Global Plate Model/PALEOMAP_PlateModel.rot')
 
 # Filename for the static plate boundaries
-static_polygons_filename = './data/palaeogeographical_reconstructions/Global_EarthByte_GPlates_PresentDay_StaticPlatePolygons.gpmlz'
+# static_polygons_filename = './data/palaeogeographical_reconstructions/Global_EarthByte_GPlates_PresentDay_StaticPlatePolygons.gpmlz'
+static_polygons_filename = './data/Scotese PaleoAtlas_v3/PALEOMAP Global Plate Model/PALEOMAP_PlatePolygons.gpml'
 
 # Load some features.
 point_features = pygplates.FeatureCollection('./data/kpg_bivalve_modern_coordinates.gmt')
@@ -698,7 +710,7 @@ Next we rotate the palaeolocations to 68 Ma and export an OGR-GMT file of these
 
 ```{python reconstruct_palaeocoordinates, eval = FALSE}
 # Reconstruct features to this geological time.
-reconstruction_time = 68
+reconstruction_time = 69
 
 # The filename of the exported reconstructed geometries.
 # It's a shapefile called 'reconstructed_68Ma.shp'.
@@ -712,7 +724,7 @@ These converted locations can be read back into R and plotted over the base map.
 
 ```{r read_palaeo_coords, fig.cap = "Palaeolocations of marine bivalve occurrences in the latest Cretaceous (70–66 Ma) plotted on a palaeogeographical map at 68 Ma.", fig.width = 9, fig.height = 4}
 palaeo_coords <-
-  st_read("./data/reconstructed_68Ma.gmt")
+  st_read("./data/reconstructed_69Ma.gmt")
 
 palaeo_coords <-
   palaeo_coords %>%
@@ -723,7 +735,7 @@ palaeo_coords <-
 
 base_map +
   geom_sf(data = palaeo_coords) +
-  coord_sf(crs = "+proj=robin")
+  coord_sf(crs = crs_wintri, datum = NULL)
 ```
 
 
@@ -734,52 +746,73 @@ We've got palaeoenvironmental data from an analysis done by @Ridgwell2010NG. The
 
 ```{r load_netcdf_meta}
 metadata <-
-  ncdump::NetCDF("./data/EXAMPLE.p0055c.RidgwellSchmidt2010.SPIN1/biogem/fields_biogem_3d.nc")
+  # ncdump::NetCDF("./data/EXAMPLE.p0055c.RidgwellSchmidt2010.SPIN1/biogem/fields_biogem_3d.nc")
+  ncdump::NetCDF("./data/texyoo.pfclann.nc")
 
 # look at the variables
 print(metadata$variable, n = Inf)
 
 # load the desired variables
 kpg_env <-
-  nc_open("./data/EXAMPLE.p0055c.RidgwellSchmidt2010.SPIN1/biogem/fields_biogem_3d.nc")
+  # nc_open("./data/EXAMPLE.p0055c.RidgwellSchmidt2010.SPIN1/biogem/fields_biogem_3d.nc")
+  nc_open("./data/texyoo.pfclann.nc")
 ```
 
 Loading the data gives us lots of lovely information. The important thing to note is that all the environment variables have values in fours components: longitude, latitude, depth, and time. The last of these is because GeNie runs for a set number of simulated years to reach a steady state. In this case it's for 10,000 years, so we'll want to use the values from year 10,000.
 
 ```{r grab_temperature}
 lon <-
-  ncvar_get(kpg_env, "lon")
+  # ncvar_get(kpg_env, "lon")
+  c(seq(0, 180 - 0.5 * (180 / 97), length.out = 48), seq(-180 + 0.5 * (180 / 97), 0, length.out = 48))
 lat <-
-  ncvar_get(kpg_env, "lat")
+  # ncvar_get(kpg_env, "lat")
+  seq(-90, 90, length.out = 73)
 temp <-
-  ncvar_get(kpg_env, "ocn_temp")
+  # ncvar_get(kpg_env, "ocn_temp")
+  ncvar_get(kpg_env, "temp_mm_dpth")
 dim(temp)
 ```
 
 The dimensions of the temperature values are 36, 36, 16, and 13. It's a four-dimensional array with 36 values each for longitude and latitude, 16 depth values, and 13 time values. The ordering means that rows are longitude, columns are latitude, and depth and time are printed as sequential matrices. We can plot this quickly.
 
 ```{r plot_temp}
-image(lon, lat, temp[,,1,13], asp = 1)
+# image(lon, lat, temp[,,1,13], asp = 1)
+image(lon, lat, temp, asp = 1)
 ```
 
 But his isn't too useful and needs some cleaning up.
 
 ```{r clean_temp}
-miss_val <- ncatt_get(kpg_env, "ocn_temp", "missing_value")
+# miss_val <- ncatt_get(kpg_env, "ocn_temp", "missing_value")
+miss_val <- ncatt_get(kpg_env, "temp_mm_dpth", "missing_value")
 temp[temp == miss_val$value] <- NA
-surface_temp <- temp[,,1,13]
+surface_temp <- temp#[,,1,13]
 
-grid = expand.grid(lon = lon, lat = lat)
+grid <- expand.grid(lon = lon, lat = lat)
 grid$ocn_temp <- c(surface_temp)
 
+modern_coastlines <-
+  st_read("/Users/bcm/Documents/PALEOMAP_PoliticalBoundaries/reconstructed_69.00Ma/reconstructed_69.00Ma_polyline.gmt")
+
+crs_ocn_temp <- "+proj=longlat +ellps=WGS84 +datum=WGS84 +pm=-360 +no_defs"
+
 temp_plot <-
-  st_as_stars(grid, dims = c("lon", "lat"), values = "ocn_temp", crs = 4326)
+  st_as_stars(grid, dims = c("lon", "lat"), values = "ocn_temp", crs = 4326) |>
+  st_as_sf()
+st_crs(temp_plot) <- 4326 
+# temp_plot <-
+#   temp_plot |>
+#   st_transform(crs_wintri)
 
 ggplot() +
-  geom_stars(data = temp_plot) + #,  aes(x = lon, y = lat, fill = ocn_temp)) +
+  geom_sf(data = grat_wintri, colour = "grey30", size = 0.25 / .pt) +
+  # geom_stars(data = temp_plot) + #,  aes(x = lon, y = lat, fill = ocn_temp)) +
+  geom_sf(data = temp_plot, aes(fill = ocn_temp), colour = NA) +
   geom_sf(data = modern_coastlines, colour = "grey60") +
+  geom_sf(data = palaeo_coords) +
   scale_fill_viridis(option = "inferno") +
-  theme_void()
+  theme_void() +
+  coord_sf(crs = crs_wintri, datum = NULL)
 ```
 
 You can see that the coastlines and temperatures don't quite match up. The projections must be different. We can either reproject the coastlines onto the 2010 data or find some more recent temperature data using this outlines.
@@ -990,7 +1023,7 @@ Once the `brm` function is run, the Stan program is compiled and then the analys
 summary(model_family_mst)
 plot(model_family_mst)
 pp_check(model_family_mst, ndraws = 100)
-conditional_effects(model_family_mst)
+plot(conditional_effects(model_family_mst), points = TRUE)
 ```
 
 The last line, `conditional_effects` plots the relationship between the input and output, i.e. the 'line of best fit' between minimum spanning tree and family extinction proportion. This will probably the most interesting and useful. You can use the argument `plot = FALSE` to save the values separately.
@@ -1001,6 +1034,7 @@ You can make a summary table for the output results with the following.
 mst_summary_table <- posterior_summary(model_family_mst) %>%
   as_tibble(rownames = "parameter") %>%
   write_csv("./output/mst_model_summary.csv")
+knitr::kable(mst_summary_table, caption = "Summarized parameters of the relationships between geographical spread and extinction proportion at the Cretaceous–Palaeogene Boundary.", digits = 3)
 ```
 
 ## Species extinctions ##
@@ -1072,10 +1106,11 @@ pp_check(model_species_temp, ndraws = 100)
 
 Here's a more complete summary of the parameters.
 
-```{r mst_model_summary}
+```{r temp_model_summary}
 temp_summary_table <- posterior_summary(model_species_temp) %>%
   as_tibble(rownames = "parameter") %>%
   write_csv("./output/temp_model_summary.csv")
+knitr::kable(temp_summary_table, digits = 3, caption = "Summarized parameter distributions for relationship between ocean surface temperature and species extinction grouped by family.")
 ```
 
 It may not appear different to the family run above, but noticed under the summary that there are 200 levels in the group-level effects: these are the coefficients for each species.
@@ -1102,9 +1137,9 @@ The parameters are estimated for all 200 or so species, hence the not very usefu
 
 ```{r plot_specific_intervals}
 #parnames(model_species_temp)
-mcmc_areas(
+mcmc_intervals(
   posterior,
-  pars = vars(contains("arca"), starts_with("r_fml") & !matches("intercept"))
+  pars = vars(starts_with("r_fml") & !matches("intercept"))
 )
 ```
 
@@ -1123,9 +1158,14 @@ model_species_temp_autocorr <-
     data = species_temp_scaled,
     family = bernoulli(),
     sample_prior = TRUE,
-    iter = 100, chains = 4, cores = 2,
+    iter = 4000, chains = 4, cores = 2,
     save_pars = save_pars()
   )
+summary(model_species_temp)
+
+posterior <- as_draws_array(model_species_temp_autocorr)
+
+mcmc_intervals(posterior, pars = vars(!matches("prior|lp__|b_|sd_|cor_")))
 ```
 
 Another source of covariation is phylogeny, which I haven't done yet but can include later.
