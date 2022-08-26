@@ -160,7 +160,7 @@ occ_checking <-
 
 Next we check for the location proximity to country centres, indicating imprecision.
 
-```{r check_occ_coordinate_precision}
+```{r check_occ_coordinate_precision, eval = FALSE}
 occ_precision <-
   occ_checking %>%
   cc_cen(lat = "lat", lon = "lng", value = "flagged")
@@ -172,7 +172,7 @@ occ_precision_fl <-
 
 Then we check whether occurrences are located within the country they are meant to come from. This requires using ISO 3-letter country codes, while the PBDB uses 2-letter codes, so some conversion is needed; it also uses UK while the country codes is GB and GBR.
 
-```{r check_occ_country_location}
+```{r check_occ_country_location, eval = FALSE}
 # Add record for UK -> GBR, AA -> ATA [Antarctica]
 cs_ma <- c("GBR", "ATA")
 names(cs_ma) <- c("UK", "AA")
@@ -198,7 +198,7 @@ occ_country_fl <-
 
 Fourth, is to check against host institutions on the Global Biodiversity Interchange Facility, in case the locations are listed as that rather than the in-the-field locality.
 
-```{r check_occ_gbif_institute}
+```{r check_occ_gbif_institute, eval = FALSE}
 occ_inst <-
   occ_checking %>%
   cc_inst(lat = "lat", lon = "lng", value = "flagged")
@@ -210,7 +210,7 @@ occ_gbif <-
 
 And finally, check for records at (0, 0).
 
-```{r check_occ_zero_zero}
+```{r check_occ_zero_zero, eval = FALSE}
 occ_zero_zero <-
   occ_checking %>%
   cc_zero(lat = "lat", lon = "lng", value = "flagged")
@@ -220,7 +220,7 @@ occ_zero_zero <-
 
 Alongside check that occurrences are not at potentially imprecise/incorrect localities, also see whether any are erroneous separated in time is useful. First removing occurrences without ages.
 
-```{r check_occ_empty_ages}
+```{r check_occ_empty_ages, eval = FALSE}
 occ_empty_ages <-
   occ_checking %>%
     filter(
@@ -280,14 +280,14 @@ Now for checking outliers in time and space — those that are much separate
       # value = "flagged"
     # )
 
-occ_outliers_taxon <-
-  occ_checking %>%
-  cf_outl(
-    taxon = "tna",
-    lat = "lat", lon = "lng",
-    min_age = "lag", max_age = "eag",
-    value = "flagged"
-  )
+# occ_outliers_taxon <-
+#   occ_checking %>%
+#   cf_outl(
+#     taxon = "tna",
+#     lat = "lat", lon = "lng",
+#     min_age = "lag", max_age = "eag",
+#     value = "flagged"
+#   )
 
 #swap lat and long over for the flagged occurrences
 occ_ids <- c("occ:102732", "occ:102733", "occ:102734", "occ:102735", "occ:102736","occ:102737","occ:102738","occ:102739","occ:102740", "occ:102741", "occ:102742", "occ:102773", "occ:102774", "occ:102775", "occ:102776", "occ:102777", "occ:102778", "occ:102780", "occ:102781", "occ:102782", "occ:102783", "occ:102784", "occ:102785", "occ:102786","occ:102787", "occ:102788", "occ:102789", "occ:102790","occ:102791", "occ:102792","occ:102793", "occ:102794", "occ:143771", "occ:143772", "occ:143773", "occ:143774", "occ:143775", "occ:143776", "occ:143777", "occ:143778", "occ:143779", "occ:143780", "occ:143781", "occ:143782", "occ:143785", "occ:143786", "occ:143787", "occ:143788", "occ:143789", "occ:143792", "occ:143793", "occ:143794", "occ:143795", "occ:143796", "occ:143799", "occ:143800", "occ:143801", "occ:143802", "occ:143803", "occ:143806", "occ:143807", "occ:143808", "occ:143809", "occ:143810", "occ:143813", "occ:143814", "occ:143815", "occ:143816", "occ:143817", "occ:143820", "occ:143821", "occ:143822", "occ:143823", "occ:143824", "occ:143827", "occ:143828", "occ:143829", "occ:143830", "occ:143831", "occ:143834", "occ:143835", "occ:143836", "occ:143837", "occ:143838", "occ:143840", "occ:143841", "occ:143842", "occ:143844", "occ:143845", "occ:143846", "occ:143848", "occ:143849", "occ:143850", "occ:143852", "occ:143853", "occ:143854", "occ:143856", "occ:143857", "occ:143859", "occ:143860", "occ:143862", "occ:143864", "occ:143865", "occ:143866", "occ:143867", "occ:143868", "occ:144716", "occ:144717", "occ:564462", "occ:564493", "occ:564494", "occ:564495", "occ:564593", "occ:564594", "occ:564595", "occ:678968", "occ:678969", "occ:678970", "occ:678971", "occ:678972", "occ:678973", "occ:678974", "occ:678975", "occ:678976", "occ:678977", "occ:678978", "occ:678979", "occ:678980", "occ:678981", "occ:678982", "occ:678983", "occ:678984", "occ:678985", "occ:678986", "occ:678987", "occ:678988", "occ:678989", "occ:678990", "occ:678991", "occ:678992", "occ:678993", "occ:678994", "occ:678995", "occ:678996", "occ:678997", "occ:678998", "occ:678999", "occ:679000", "occ:679001", "occ:679002", "occ:679003", "occ:679004", "occ:679005", "occ:679006", "occ:679007", "occ:679008", "occ:691679", "occ:691680", "occ:691681", "occ:691682", "occ:691683", "occ:691684", "occ:691685", "occ:691691", "occ:692061", "occ:692062", "occ:692063", "occ:692064", "occ:692065", "occ:692066", "occ:692067", "occ:692068", "occ:692069", "occ:692070", "occ:692071", "occ:692072", "occ:692073", "occ:692074", "occ:692075", "occ:692076", "occ:692077", "occ:692078", "occ:692079","occ:692080", "occ:692081", "occ:692082", "occ:692083", "occ:692084", "occ:692085", "occ:692086", "occ:692087", "occ:692088", "occ:692089", "occ:692090", "occ:692091", "occ:1018904", "occ:1018905", "occ:1228468", "occ:1468425", "occ:1468428")
@@ -357,7 +357,7 @@ bivalve_cleaned <-
 
 Next, we check for spelling differences. Here, we use the *distance* between strings, in essence the number of characters different, to check whether there are misspelled names. Package *stringdist* has the function `stringdistmatrix` that calculates the pairwise distances within a string vector, thus showing the most similarly-spelled taxon names. Using an arbitrary distance cutoff — in this case 4, but `string_cutoff` can be changed — will show the most similar strings.
 
-```{r spelling_errors}
+```{r spelling_errors, cache = TRUE}
 str_dist_matrix <-
   bivalve_cleaned %>%
   filter(rnk == 3) %>%
@@ -446,7 +446,7 @@ errant_families %>%
 
 This list of uncertain taxa can then be compared against an online data base, such as [LifeWatch](https://www.lifewatch.be/data-services/).
 
-```{r}
+```{r read_lifewatch_records}
 lifewatch_taxon_check <-
   read_csv("./output/19470_uncertain_taxa.csv")
 
@@ -455,7 +455,7 @@ print(lifewatch_taxon_check)
 
 #allocating families to errant taxa
 
-```{r}
+```{r replace_unknown_families}
 bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "entolium")] <- "Entoliidae"
 bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "balabania")] <- "Radiolitidae"
 bivalve_cleaned$fml[str_which(bivalve_cleaned$tna_trimmed, "dechaseauxia")] <- "Radiolitidae"
@@ -534,7 +534,7 @@ bivalve_cleaned <-
 
 And finally check it's all good.
 
-```{r family_records}
+```{r family_records_again}
 bivalve_cleaned %>%
   pull(fml) %>%
   unique()
@@ -567,12 +567,20 @@ Now, we put these together into the plot using the `geom_sf` function to build u
 The essence of plotting with `geom_sf` is to add the different layers one by one. In this case, the first call plots the country outlines then the second line plots the occurrence points over the top; `scale_colour_viridis` is a good set of plotting colours to use as they are colour blind-friendly; and the final theme options remove the border and the grey background usual in *ggplot* plots.
 
 ```{r plot_occurrence_map, fig.cap = "Map of Bivalvia localities from the Cretaceous and Palaeogene.", fig.width = 7, fig.height = 4}
+# Getting this to work for the Winkel Tripel Projection used help from here: https://wilkelab.org/practicalgg/articles/Winkel_tripel.html
+crs_wintri <- "+proj=wintri +datum=WGS84 +no_defs +over"
+
+grat_wintri <-
+  st_graticule(lat = c(-89.9, seq(-80, 80, 20), 89.9)) |>
+  st_transform_proj(crs = crs_wintri)
+
 ggplot() +
+  geom_sf(data = grat_wintri, colour = "grey30", size = 0.25/.pt) +
   geom_sf(data = world_map, inherit.aes = FALSE) +
   geom_sf(data = occurrences_to_plot, mapping = aes(colour = fml)) +
   scale_colour_viridis(discrete = TRUE) +
-  coord_sf(crs = "+proj=robin") +
-  theme_bw() +
+  coord_sf(crs = crs_wintri, datum = NULL) +
+  ggthemes::theme_map() +
   theme(
     legend.position = "none",
     panel.border = element_blank()
@@ -612,9 +620,12 @@ map_data <-
       id = factor(id, levels = palaeogeo_file_layers, labels = names(palaeogeo_file_layers))
     )
 
+modern_coastlines <-
+  st_read("./data/palaeogeographical_reconstructions/Global_EarthByte_GPlates_PresentDay_Coastlines_Polyline_reconstructed_68.00Ma.gmt")
+
 base_map <-
   ggplot() +
-    geom_sf(data = map_data, aes(fill = id), colour = NA) +
+  geom_sf(data = lwgeom::st_transform_proj(map_data, crs = crs_wintri), aes(fill = id), colour = NA) +
     scale_discrete_manual(
       # colours for base map layers
       values =
@@ -627,15 +638,13 @@ base_map <-
       aesthetics = c("fill"),
       name = "Palaeogeography"
     ) +
-    theme_bw() +
+    geom_sf(data = grat_wintri, colour = "grey30", size = 0.25/.pt) +
+    ggthemes::theme_map() +
     theme(panel.border = element_blank())
-
-modern_coastlines <-
-  st_read("./data/palaeogeographical_reconstructions/Global_EarthByte_GPlates_PresentDay_Coastlines_Polyline_reconstructed_68.00Ma.gmt")
 
 base_map +
   geom_sf(data = modern_coastlines, colour = "grey60") +
-  coord_sf(crs = "+proj=robin")
+    coord_sf(crs = crs_wintri, datum = NULL)
 ```
 
 ## Rotating modern locality coordinates
@@ -644,7 +653,8 @@ We have the modern localities for our bivalve occurrences, but need to *rotate* 
 
 ```{r write_bivalve_coords, eval = FALSE}
 ek_occurrences <-
-  bivalve_cleaned %>%
+  bivalve_cleaned |>
+  filter(rnk == 3) |>
   filter(lag >= 66 & lag < 70)
 
 modern_coords <-
@@ -665,10 +675,12 @@ There are two steps to reconstructing the palaeocoordinates: (1) assigning the l
 import pygplates
 
 # Load one or more rotation files into a rotation model.
-rotation_model = pygplates.RotationModel('./data/palaeogeographical_reconstructions/Muller2019-Young2019-Cao2020_CombinedRotations.rot')
+# rotation_model = pygplates.RotationModel('./data/palaeogeographical_reconstructions/Muller2019-Young2019-Cao2020_CombinedRotations.rot')
+rotation_model = pygplates.RotationModel('./data/Scotese PaleoAtlas_v3/PALEOMAP Global Plate Model/PALEOMAP_PlateModel.rot')
 
 # Filename for the static plate boundaries
-static_polygons_filename = './data/palaeogeographical_reconstructions/Global_EarthByte_GPlates_PresentDay_StaticPlatePolygons.gpmlz'
+# static_polygons_filename = './data/palaeogeographical_reconstructions/Global_EarthByte_GPlates_PresentDay_StaticPlatePolygons.gpmlz'
+static_polygons_filename = './data/Scotese PaleoAtlas_v3/PALEOMAP Global Plate Model/PALEOMAP_PlatePolygons.gpml'
 
 # Load some features.
 point_features = pygplates.FeatureCollection('./data/kpg_bivalve_modern_coordinates.gmt')
@@ -696,7 +708,7 @@ Next we rotate the palaeolocations to 68 Ma and export an OGR-GMT file of these
 
 ```{python reconstruct_palaeocoordinates, eval = FALSE}
 # Reconstruct features to this geological time.
-reconstruction_time = 68
+reconstruction_time = 69
 
 # The filename of the exported reconstructed geometries.
 # It's a shapefile called 'reconstructed_68Ma.shp'.
@@ -710,7 +722,7 @@ These converted locations can be read back into R and plotted over the base map.
 
 ```{r read_palaeo_coords, fig.cap = "Palaeolocations of marine bivalve occurrences in the latest Cretaceous (70–66 Ma) plotted on a palaeogeographical map at 68 Ma.", fig.width = 9, fig.height = 4}
 palaeo_coords <-
-  st_read("./data/reconstructed_68Ma.gmt")
+  st_read("./data/reconstructed_69Ma.gmt")
 
 palaeo_coords <-
   palaeo_coords %>%
@@ -721,7 +733,7 @@ palaeo_coords <-
 
 base_map +
   geom_sf(data = palaeo_coords) +
-  coord_sf(crs = "+proj=robin")
+  coord_sf(crs = crs_wintri, datum = NULL)
 ```
 
 
@@ -732,52 +744,71 @@ We've got palaeoenvironmental data from an analysis done by @Ridgwell2010NG. The
 
 ```{r load_netcdf_meta}
 metadata <-
-  ncdump::NetCDF("./data/EXAMPLE.p0055c.RidgwellSchmidt2010.SPIN1/biogem/fields_biogem_3d.nc")
+  # ncdump::NetCDF("./data/EXAMPLE.p0055c.RidgwellSchmidt2010.SPIN1/biogem/fields_biogem_3d.nc")
+  ncdump::NetCDF("./data/texyoo.pfclann.nc")
 
 # look at the variables
 print(metadata$variable, n = Inf)
 
 # load the desired variables
 kpg_env <-
-  nc_open("./data/EXAMPLE.p0055c.RidgwellSchmidt2010.SPIN1/biogem/fields_biogem_3d.nc")
+  # nc_open("./data/EXAMPLE.p0055c.RidgwellSchmidt2010.SPIN1/biogem/fields_biogem_3d.nc")
+  nc_open("./data/texyoo.pfclann.nc")
 ```
 
 Loading the data gives us lots of lovely information. The important thing to note is that all the environment variables have values in fours components: longitude, latitude, depth, and time. The last of these is because GeNie runs for a set number of simulated years to reach a steady state. In this case it's for 10,000 years, so we'll want to use the values from year 10,000.
 
 ```{r grab_temperature}
 lon <-
-  ncvar_get(kpg_env, "lon")
+  # ncvar_get(kpg_env, "lon")
+  c(seq(0, 180 - 0.5 * (180 / 97), length.out = 48), seq(-180 + 0.5 * (180 / 97), 0, length.out = 48))
 lat <-
-  ncvar_get(kpg_env, "lat")
+  # ncvar_get(kpg_env, "lat")
+  seq(-90, 90, length.out = 73)
 temp <-
-  ncvar_get(kpg_env, "ocn_temp")
+  # ncvar_get(kpg_env, "ocn_temp")
+  ncvar_get(kpg_env, "temp_mm_dpth")
 dim(temp)
 ```
 
 The dimensions of the temperature values are 36, 36, 16, and 13. It's a four-dimensional array with 36 values each for longitude and latitude, 16 depth values, and 13 time values. The ordering means that rows are longitude, columns are latitude, and depth and time are printed as sequential matrices. We can plot this quickly.
 
-```{r plot_temp}
-image(lon, lat, temp[,,1,13], asp = 1)
+```{r plot_temp, eval = FALSE}
+# image(lon, lat, temp[,,1,13], asp = 1)
+image(lon, lat, temp, asp = 1)
 ```
 
 But his isn't too useful and needs some cleaning up.
 
 ```{r clean_temp}
-miss_val <- ncatt_get(kpg_env, "ocn_temp", "missing_value")
+# miss_val <- ncatt_get(kpg_env, "ocn_temp", "missing_value")
+miss_val <- ncatt_get(kpg_env, "temp_mm_dpth", "missing_value")
 temp[temp == miss_val$value] <- NA
-surface_temp <- temp[,,1,13]
+surface_temp <- temp#[,,1,13]
 
-grid = expand.grid(lon = lon, lat = lat)
+grid <- expand.grid(lon = lon, lat = lat)
 grid$ocn_temp <- c(surface_temp)
 
+modern_coastlines <-
+  st_read("/Users/bcm/Documents/PALEOMAP_PoliticalBoundaries/reconstructed_69.00Ma/reconstructed_69.00Ma_polyline.gmt")
+
 temp_plot <-
-  st_as_stars(grid, dims = c("lon", "lat"), values = "ocn_temp", crs = 4326)
+  st_as_stars(grid, dims = c("lon", "lat"), values = "ocn_temp", crs = 4326) |>
+  st_as_sf()
+st_crs(temp_plot) <- 4326 
+# temp_plot <-
+#   temp_plot |>
+#   st_transform(crs_wintri)
 
 ggplot() +
-  geom_stars(data = temp_plot) + #,  aes(x = lon, y = lat, fill = ocn_temp)) +
+  geom_sf(data = grat_wintri, colour = "grey30", size = 0.25 / .pt) +
+  # geom_stars(data = temp_plot) + #,  aes(x = lon, y = lat, fill = ocn_temp)) +
+  geom_sf(data = temp_plot, aes(fill = ocn_temp), colour = NA) +
   geom_sf(data = modern_coastlines, colour = "grey60") +
+  geom_sf(data = palaeo_coords) +
   scale_fill_viridis(option = "inferno") +
-  theme_void()
+  theme_void() +
+  coord_sf(crs = crs_wintri, datum = NULL)
 ```
 
 You can see that the coastlines and temperatures don't quite match up. The projections must be different. We can either reproject the coastlines onto the 2010 data or find some more recent temperature data using this outlines.
@@ -968,7 +999,7 @@ Here we see how the model is defined with `ext_prop ~ mst_stand`, i.e. the extin
 
 Run this code block and then we'll see what the output looks like.
 
-```{r brms_mst_formula}
+```{r brms_mst_formula, cache = TRUE}
 model_family_mst <-
   brm(
     ext_prop ~ mst_stand,
@@ -988,7 +1019,7 @@ Once the `brm` function is run, the Stan program is compiled and then the analys
 summary(model_family_mst)
 plot(model_family_mst)
 pp_check(model_family_mst, ndraws = 100)
-conditional_effects(model_family_mst)
+plot(conditional_effects(model_family_mst), points = TRUE)
 ```
 
 The last line, `conditional_effects` plots the relationship between the input and output, i.e. the 'line of best fit' between minimum spanning tree and family extinction proportion. This will probably the most interesting and useful. You can use the argument `plot = FALSE` to save the values separately.
@@ -999,6 +1030,7 @@ You can make a summary table for the output results with the following.
 mst_summary_table <- posterior_summary(model_family_mst) %>%
   as_tibble(rownames = "parameter") %>%
   write_csv("./output/mst_model_summary.csv")
+knitr::kable(mst_summary_table, caption = "Summarized parameters of the relationships between geographical spread and extinction proportion at the Cretaceous–Palaeogene Boundary.", digits = 3)
 ```
 
 ## Species extinctions ##
@@ -1047,7 +1079,7 @@ get_prior(
 
 The syntax `(pocn_temp_scaled | tna_trimmed)` estimates the temperature coefficient for each species grouping. This creates a correlation matrix with the model (`lkj(1)` in the priors). We then run the model itself. This will be slower than the family-level analysis because it is estimating much more from more data.
 
-```{r brms_species_temp}
+```{r brms_species_temp, cache = TRUE}
 model_species_temp <-
   brm(
     # kpg_ext ~ 1 + (pocn_temp_scaled | tna_trimmed),
@@ -1070,10 +1102,11 @@ pp_check(model_species_temp, ndraws = 100)
 
 Here's a more complete summary of the parameters.
 
-```{r mst_model_summary}
+```{r temp_model_summary}
 temp_summary_table <- posterior_summary(model_species_temp) %>%
   as_tibble(rownames = "parameter") %>%
   write_csv("./output/temp_model_summary.csv")
+knitr::kable(temp_summary_table, digits = 3, caption = "Summarized parameter distributions for relationship between ocean surface temperature and species extinction grouped by family.")
 ```
 
 It may not appear different to the family run above, but noticed under the summary that there are 200 levels in the group-level effects: these are the coefficients for each species.
@@ -1100,9 +1133,9 @@ The parameters are estimated for all 200 or so species, hence the not very usefu
 
 ```{r plot_specific_intervals}
 #parnames(model_species_temp)
-mcmc_areas(
+mcmc_intervals(
   posterior,
-  pars = vars(contains("arca"), starts_with("r_fml") & !matches("intercept"))
+  pars = vars(starts_with("r_fml") & !matches("intercept"))
 )
 ```
 
@@ -1124,6 +1157,11 @@ model_species_temp_autocorr <-
     iter = 4000, chains = 4, cores = 4,
     save_pars = save_pars()
   )
+summary(model_species_temp)
+
+posterior <- as_draws_array(model_species_temp_autocorr)
+
+mcmc_intervals(posterior, pars = vars(!matches("prior|lp__|b_|sd_|cor_")))
 ```
 
 Another source of covariation is phylogeny, which I haven't done yet but can include later.
